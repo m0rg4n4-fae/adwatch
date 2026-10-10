@@ -19,3 +19,9 @@ venv/
 /stats.json
 /decoys.json
 *.json.tmp
+
+# developer-only files: not needed to use adwatch (kept on the maintainer's machine)
+/CLAUDE.md
+/.claude/
+/docs/
+/tests/

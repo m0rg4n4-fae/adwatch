@@ -4,13 +4,35 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Ads you leave through the Play Store (Oct 10)
+- Pressing the store badge often opens the Play Store as a sheet *over* the ad, and Android still reports the ad as the screen in front. adwatch used to think the press hadn't worked and press again, inside the store sheet. It then took the store's own "Close sheet" for an ad button and called it a decoy. Now:
+  - It waits up to 5 seconds for the store.
+  - It checks the phone's screen tree for a store sheet and backs out of it with BACK, counting that as the badge's intended trip.
+  - It only presses again if the badge is still showing and the ad is still in front.
+- Buttons belonging to the Play Store (or Galaxy Store) are never taken for ad buttons.
+- A store trip within 20 seconds of a badge press counts as the badge's trip, even if the store was slow to open. It isn't blamed on anything and gets no breather.
+- After any other store trip (for example the wake press opening the store), a badge that's now showing is pressed straight away instead of after `stuck_seconds`. A trip caused by the wake press gets no breather.
+- Near-miss counts start over after a store trip.
+
+### "Close Ad? You will lose your reward" (Oct 10)
+- When the ad's X is tapped too early, Google shows this box. adwatch now taps **Resume**, never Close, and leaves the ad alone for `reward_wait_seconds` (30). It also raises that game's earliest close time (`passive_min_seconds` in watch mode, `ad_min_seconds` in the ad loop) to 30 in its profile, so it doesn't happen again.
+- The box is read from the phone's screen tree, or recognised by a picture of its Resume button, which ships in the starter set.
+- A title like "Close Ad?" no longer counts as a close button (it used to get tapped, doing nothing). Neither does any label that is a question or a sentence.
+- A near-miss that was tapped and didn't close the ad isn't tapped again in that spot.
+
+### Keep the computer awake (Oct 10)
+- `run`, `watch` and `keepalive` stop the computer from sleeping while they run: a `systemd-inhibit` lock (sleep and idle) on Linux, `caffeinate` on macOS, a power request on Windows. The screen can still turn off.
+- On by default. Switch it off under **Settings → Keep this computer awake while running** (applies to all games), or per run with `--no-keep-awake`. `--keep-awake` turns it on for one run.
+- The lock goes away by itself the moment adwatch exits, even after a crash or a kill. Under `keepalive` one lock covers the restarts and the wait for a fix.
+- If the system refuses the lock, adwatch says why and runs anyway.
+
 ### Game pop-ups (Oct 9)
 - **"Misc buttons"**: the game's own pop-ups (a level-up OK, a daily reward...) can be saved per game with what to do about each one: tap it, tap beside it, swipe it up/down/left/right, or press Back. Save them with **Teach it buttons → Game pop-up** or `grab GAME NAME --misc --action ...`, and remove them with **Forget a game pop-up**.
 - They're dealt with before each ad, whenever one hides the ad button, when one shows up right after an ad (which also counts as the game being back), while recovering from a failed step, and every `misc_check_seconds` (5) in watch mode. At most `misc_max_per_minute` (8) a minute.
 - A game with none saved takes no extra screenshots.
 
 ### Ad handling rework (Oct 9)
-Worked out from 16 ads that beat adwatch on Oct 9 and the Idle Miner logs from the same day.
+Worked out from 16 ads that beat adwatch on Oct 9 and logs from a bot that uses adwatch as a library.
 - **Landscape ads are matched at the right size.** The screen used to be shrunk by its long side, so in landscape every saved picture was 2.2x too big to fit. Pictures saved from a landscape screen had the opposite problem: they were shrunk to a few pixels, which is why the dark ringed X's (`close_27`, `close_30`, `close_32`) "matched" random dark spots mid-video and opened the store.
 - **Close buttons are looked for near the screen's edges, and at a few sizes.** A match away from the edges must score 0.96. When nothing matches at the saved size, the closest pictures are tried 0.8x to 1.25x.
 - **Near-misses are tapped.** A picture that scores at least 0.80, in the same spot on 3 looks in a row, on a screen that isn't playing, is tapped. The puzzle ad's "Reward granted X" sat at 0.84 for over a minute. This also works for faded store badges.
@@ -26,7 +48,7 @@ Worked out from 16 ads that beat adwatch on Oct 9 and the Idle Miner logs from t
 - **The game counts as back when the screen matches the game's screen from before the ad**, even if none of its saved pictures show.
 - **Android's "Reward granted" label** counts as a close button, and its X is pressed.
 - **The "which screen is in front" check** goes through the open fast shell, about half the time of a new adb call.
-- **Ad statistics**: ads watched (and given up) per game, per phone and in total, with today's count and time spent, in `stats.json`. See them with `adwatch stats` or **Ad stats** in the menu. A run ends with the game's all-time count. Ads the Idle Miner bot watches through adwatch are counted too.
+- **Ad statistics**: ads watched (and given up) per game, per phone and in total, with today's count and time spent, in `stats.json`. See them with `adwatch stats` or **Ad stats** in the menu. A run ends with the game's all-time count. Ads watched by other scripts that use adwatch as a library are counted too.
 
 ### New
 - **Unattended runs.** `adwatch keepalive run GAME ...` (or `keepalive watch ...`) restarts adwatch after a crash. If it stops because of repeated problems, it waits up to `--wait-hours` (default 4) for a fix: drop a file called `restart` in `control/` to start it again, or `stop` to end it.
@@ -101,6 +123,6 @@ These are in `adwatch/cli.py` on your computer but weren't part of the changes l
 
 ### New commands and flags
 - Commands: `keepalive`, `tidy`, `stats`.
-- Global flags: `-v`, `--feed DEVICE`, `--screen raw|png|auto`, `--no-fast-taps`.
+- Global flags: `-v`, `--feed DEVICE`, `--screen raw|png|auto`, `--no-fast-taps`, `--keep-awake` / `--no-keep-awake`.
 - `grab --popup`, `grab --skip`, `grab --misc --action`, `tidy --yes`, `keepalive --wait-hours`.
 - `.gitignore` now leaves out `logs/` and `control/`.

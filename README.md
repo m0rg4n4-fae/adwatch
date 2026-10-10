@@ -41,6 +41,7 @@ Free-to-play games make you watch a lot of ads to get anywhere. adwatch runs on 
 - **Handles the awkward ads.** Ones that throw you into the Play Store, and ones you can only leave through the store.
 - **Any phone size.** Saved buttons are rescaled, so the same ones work on a different phone, and in landscape ads.
 - **Clears the game's own pop-ups.** Level-up notices, daily rewards and the like are tapped, swiped away or closed with Back, however you saved them, so an unattended game doesn't stall.
+- **Keeps the computer awake.** While it runs, the computer won't go to sleep (systemd-inhibit on Linux, caffeinate on macOS). The screen can still turn off. Switch it off under **Settings**, or with `--no-keep-awake`.
 - **Keeps count.** How many ads it has gotten through, per game, per phone and in total (**Ad stats** in the menu, or `adwatch stats`).
 - **Nothing on the phone.** No root and no app to install. It only takes screenshots and sends taps.
 
@@ -131,6 +132,7 @@ Then open a pull request with the new files. They are small crops of ad close bu
 | An ad only lets you out through Google Play | **Teach it buttons → Store badge**. It is only used when no close button shows up. |
 | It keeps going to the store and back on one ad | It stops using whatever caused the trip in that spot, waits longer each time, and gives up after 5 trips (the ad loop then restarts the game). `logs/debug.log` shows which tap did it, and `decoys.json` lists the spots it now avoids. |
 | The game stalls on its own pop-up (level up, daily reward...) | **Teach it buttons → Game pop-up**: box its button and choose what to do (tap it, tap beside it, swipe it away, or Back). It's dealt with whenever it shows up: before each ad, when it hides the ad button, right after an ad, and every few seconds in watch mode. |
+| "Close Ad? You will lose your reward" comes up | The ad's X was tapped too early. adwatch taps **Resume** (never Close), leaves the ad alone for 30 seconds, and from then on doesn't close that game's ads before 30 seconds. |
 | A Skip or "Reward granted" button waits until the ad is over | Save it as a skip button: **Teach it buttons → Skip button**, or `k` while paused. Skip buttons are tapped right away. |
 | A pop-up over the ad (like an "Install" bubble) blocks it | **Teach it buttons → Ad pop-up to tap away**, boxing the whole pop-up. Whenever it shows up, adwatch taps beside it. |
 | The store badge fades out and doesn't come back | Set a wake point in the middle of the ad (run with pausing on and press `w`). Points near the very top or bottom of the screen get swallowed by Android, so adwatch moves them in a little. |
@@ -162,7 +164,7 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 
 `grab` flags: `--then-ad` (tap it, then watch the ad), `--step` (just tap it), `--optional`, `--close` (an ad's X), `--skip` (a Skip, >> or "Reward granted X" button, tapped right away), `--stuck` (a store badge), `--popup` (a pop-up to tap away), `--misc` (one of the game's own pop-ups, with `--action tap|beside|swipe-up|swipe-down|swipe-left|swipe-right|back`), `--open` (a button that opens the pop-up holding the ad button), `--ingame` (something only the game shows), `--delay N` (seconds before the screenshot).
 
-`-s SERIAL` before the command picks a phone when several are connected. `--screen raw|png|auto` picks the adb screenshot format (auto times both once and uses the faster: raw usually wins over USB, png over Wi-Fi). `--no-fast-taps` sends each tap as its own adb command, for phones where the faster way misbehaves. `-v` prints the detailed debug log as it runs; it is always written to `logs/debug.log` either way (screen-grab and matching times, every score, tap and key, and why each decision was made).
+`-s SERIAL` before the command picks a phone when several are connected. `--screen raw|png|auto` picks the adb screenshot format (auto times both once and uses the faster: raw usually wins over USB, png over Wi-Fi). `--no-fast-taps` sends each tap as its own adb command, for phones where the faster way misbehaves. `--no-keep-awake` / `--keep-awake` override the Settings choice for keeping the computer from sleeping during a run (on by default). `-v` prints the detailed debug log as it runs; it is always written to `logs/debug.log` either way (screen-grab and matching times, every score, tap and key, and why each decision was made).
 
 `adwatch keepalive run GAME ...` (or `keepalive watch ...`) runs unattended: it restarts after a crash and, if adwatch stops because of repeated problems, waits for a file called `restart` in the `control/` folder before starting again. Everything is logged to `logs/adwatch.log`, and the screen is saved to `debug/` whenever something goes wrong.
 

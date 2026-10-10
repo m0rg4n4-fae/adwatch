@@ -1331,11 +1331,15 @@ CLOSE_RE = re.compile(
     r"(^|[^a-z])(close|skip|dismiss|no thanks|reward granted)([^a-z]|$)|^\s*[x×✕✖]\s*$", re.I
 )
 BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+LOSE_REWARD_RE = re.compile(r"lose (your |the )?reward|close (the )?(ad|video)\s*\?", re.I)
+RESUME_RE = re.compile(r"^(resume|resume video|continue watching|keep watching|back to (the )?(ad|video))$", re.I)
 
 
-def ui_close_button(skip=()):
-    """Look for a close/skip control in the UI hierarchy. Often fails during
-    video playback (uiautomator can't get an idle state) - that's fine."""
+STORE_PACKAGES = ("com.android.vending", "com.sec.android.app.samsungapps")
+
+
+def ui_nodes():
+    """The phone's screen tree as a list of nodes, or None if it couldn't be read."""
     # Delete the old dump first and only read it if this dump succeeded: otherwise a failed dump
     # (common during video) left the PREVIOUS screen's file, and we tapped buttons that were gone.
     t0 = time.time()
@@ -1346,12 +1350,53 @@ def ui_close_button(skip=()):
         dlog(f"ui tree: no dump ({(time.time() - t0) * 1000:.0f} ms) - screen probably animating")
         return None
     try:
-        root = ET.fromstring(xml[start:])
+        return list(ET.fromstring(xml[start:]).iter("node"))
     except ET.ParseError:
         return None
-    for n in root.iter("node"):
+
+
+def store_sheet_open(nodes=None):
+    """True if the Play Store (or Galaxy Store) is showing as a sheet over the ad. Such a sheet
+    doesn't take over the screen, so Android still reports the ad as what's in front."""
+    if nodes is None:
+        nodes = ui_nodes()
+    return bool(nodes) and any(n.get("package") in STORE_PACKAGES for n in nodes)
+
+
+def ui_close_button(skip=()):
+    """Look for a close/skip control in the UI hierarchy. Often fails during
+    video playback (uiautomator can't get an idle state) - that's fine.
+    Returns (x, y, label[, kind]); kind "resume" = the lose-your-reward box's Resume,
+    "store" = a Play Store sheet is open over the ad (nothing to tap here: go back from it)."""
+    t0 = time.time()
+    nodes = ui_nodes()
+    if nodes is None:
+        return None
+    if store_sheet_open(nodes):
+        dlog("ui tree: a Play Store sheet is open over the ad")
+        return (0, 0, "Play Store sheet", "store")
+    # Only the game's and the ad's own buttons count (never another app's).
+    nodes = [n for n in nodes if n.get("package") not in STORE_PACKAGES]
+    # Google's "Close Ad? - You will lose your reward - CLOSE / RESUME" box: the X was tapped
+    # too early. RESUME keeps the reward; the caller waits before trying to close again.
+    words = " ".join(" ".join(n.get(k, "") for k in ("text", "content-desc")) for n in nodes)
+    if LOSE_REWARD_RE.search(words):
+        for n in nodes:
+            t = (n.get("text") or n.get("content-desc") or "").strip()
+            m = BOUNDS_RE.match(n.get("bounds", ""))
+            if m and RESUME_RE.match(t):
+                x1, y1, x2, y2 = map(int, m.groups())
+                dlog(f"ui tree: 'lose your reward' box - '{t}' at {(x1 + x2) // 2},{(y1 + y2) // 2}")
+                return ((x1 + x2) // 2, (y1 + y2) // 2, t, "resume")
+        dlog("ui tree: 'lose your reward' box without a Resume button - not tapping its Close")
+        return None
+    for n in nodes:
         label = " ".join(n.get(k, "") for k in ("text", "content-desc", "resource-id"))
-        if not CLOSE_RE.search(label) or label.strip() in skip:
+        if label.strip() in skip:
+            continue
+        # A close word in a sentence or a question ("Close Ad?") is a title, not a button.
+        if not any(CLOSE_RE.search(v) and not v.strip().endswith("?") and len(v.split()) <= 3
+                   for v in (n.get("text", ""), n.get("content-desc", ""), n.get("resource-id", "")) if v.strip()):
             continue
         m = BOUNDS_RE.match(n.get("bounds", ""))
         if not m:
@@ -1558,7 +1603,7 @@ def sync_starter():
     have = {_digest(p) for p in glob.glob(os.path.join(COMMON_DIR, "*.png"))}
     for src in sorted(glob.glob(os.path.join(STARTER_DIR, "*.png"))):
         name = os.path.basename(src)
-        if name in seen or not re.match(r"^(close|stuck|popup|skip)_", name) or not os.path.exists(src + ".json"):
+        if name in seen or not re.match(r"^(close|stuck|popup|skip|resume)_", name) or not os.path.exists(src + ".json"):
             continue
         seen.add(name)
         dst = os.path.join(COMMON_DIR, name)
@@ -1581,7 +1626,7 @@ def cmd_pack(args):
     dst_dir = os.path.abspath(os.path.expanduser(args.to)) if args.to else STARTER_DIR
     os.makedirs(dst_dir, exist_ok=True)
     added = already = no_size = 0
-    for kind in ("close", "stuck", "popup", "skip"):
+    for kind in ("close", "stuck", "popup", "skip", "resume"):
         for src in sorted(glob.glob(os.path.join(src_dir, f"{kind}_*.png"))):
             if not os.path.exists(src + ".json"):       # without its screen size it can't be rescaled
                 no_size += 1
@@ -1786,6 +1831,7 @@ def watch_ad(cfg, base, log, home=None):
     press_ms = cfg.get("press_ms", 120)
     max_stuck = cfg.get("max_stuck_taps", 2)
     stuck_taps, last_stuck, badge_seen, badge_near = 0, 0.0, None, {}
+    last_badge, badge_now = -1e9, False   # badge_now: press a visible badge right away (after a store trip)
     popups = with_common(cfg.get("popup_templates", []), base, "popup_*.png")
     pop_taps, last_pop, pop_pick = 0, 0.0, 0
     # Things an ad needs tapped to finish (a survey's answer and its Done button): tapped in
@@ -1802,7 +1848,12 @@ def watch_ad(cfg, base, log, home=None):
     bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = [], 0.0, False, None, False
     ring, said_ring = CountdownRing(), False
     prev_small, looks, video_looks, last_video, said_ended = None, 0, 0, 0.0, False
-    near_seen, game_looks = {}, 0
+    near_seen, near_tapped, game_looks = {}, set(), 0
+    # Google's "Close Ad? You will lose your reward" box, as a picture (resume_*.png) for when
+    # the phone's screen tree can't be read; see also ui_close_button.
+    resumes = with_common([], base, "resume_*.png")
+    reward_wait = cfg.get("reward_wait_seconds", 30)
+    reward_hold = 0.0
     back_presses, fast_backs = 0, 0
     closed_once = False
     LAST_AD_END["why"] = None
@@ -1840,6 +1891,44 @@ def watch_ad(cfg, base, log, home=None):
         if result is not None:
             record_ad(pkg, "gave_up" if result is False else "watched", time.time() - start)
         return result
+
+    def return_from_sheet():
+        """Back out of a Play Store sheet shown over the ad: the badge's intended trip."""
+        nonlocal badge_now, last_act
+        for _ in range(3):
+            key("KEYCODE_BACK")
+            nap(1.5)
+            if not (use_ui and store_sheet_open()):
+                break
+        near_seen.clear()
+        badge_now = False
+        last_act = ("returned", "", time.time(), None)
+
+    def keep_reward(x, y, how):
+        """The ad warned that closing now loses the reward: RESUME, then leave it alone a while."""
+        nonlocal reward_hold, hold_until, min_s
+        log(f"  'Close ad? You will lose your reward' - tapping {how} and waiting {reward_wait}s before "
+            "trying to close it again")
+        tap(x, y, jitter=2)
+        acted("resume")
+        reward_hold = time.time() + reward_wait
+        hold_until = max(hold_until, reward_hold)
+        near_seen.clear()
+        key_name = "passive_min_seconds" if passive else "ad_min_seconds"
+        if cfg.get(key_name, 5 if passive else 15) < reward_wait:
+            cfg[key_name] = reward_wait               # this game's ads are reward ads: close them later
+            path = cfg.get("_profile_path")
+            if path:
+                try:
+                    with open(path) as f:
+                        raw = json.load(f)
+                    raw[key_name] = reward_wait
+                    save_profile(path, raw)
+                    log(f"  this game shows reward ads: from now on its ads aren't closed before {reward_wait}s "
+                        f"({key_name} in its profile)")
+                except (OSError, ValueError):
+                    pass
+        nap(2)
 
     def tap_button(hit, kind, gray, note=""):
         nonlocal closed_once
@@ -1879,12 +1968,18 @@ def watch_ad(cfg, base, log, home=None):
                 return finish(None)
             store_trips += 1
             cause = last_act if last_act and time.time() - last_act[2] < 10 else None
+            if time.time() - last_badge < 20:              # the badge was pressed: this is the intended trip
+                cause = ("badge", "", last_badge, None)
             how = {"wake": "the wake press", "ui": "a labelled button", "close": "a close picture", "skip": "a skip button",
                    "popup": "the tap beside a pop-up", "badge": "the store badge"}.get(cause[0]) if cause else None
             log(f"  left the game ({fg}){' after ' + how if how else ''}, pressing BACK to return")
             if cause and cause[0] != "badge":
                 blame(cause[0], cause[1], cause[3])
             return_to_game(pkg, log, cfg.get("max_back_presses", 5))
+            near_seen.clear()
+            # Some ads only show their way out after the badge's own trip: after any other trip,
+            # a badge that is showing is pressed straight away (no waiting for stuck_seconds).
+            badge_now = bool(stuck) and not (cause and cause[0] == "badge")
             closed_once = False  # back on the same ad: what was tapped didn't close it
             min_s = 0  # the ad was clicked through; look for its X right away
             last_act = ("returned", "", time.time(), None)    # (counts as activity for the give-up clock)
@@ -1892,7 +1987,7 @@ def watch_ad(cfg, base, log, home=None):
                 log(f"  {store_trips} trips to the store and the ad still isn't done - giving up on it")
                 snapshot("store-loop", log)
                 return finish(False, "store-loop")
-            if not (cause and cause[0] == "badge"):         # the badge trip is the intended way out
+            if not (cause and cause[0] in ("badge", "wake")):   # badge = the way out; wake = a step towards it
                 pause_s = min(10 * store_trips, 40)
                 hold_until = time.time() + pause_s
                 log(f"  letting the ad play for {pause_s}s before trying anything else")
@@ -1986,6 +2081,12 @@ def watch_ad(cfg, base, log, home=None):
                 tap_button(hit, "skip", gray, f" - a skip button, {elapsed:.0f}s in")
                 continue
 
+        if resumes:
+            hit = find(gray, resumes, close_thr, "lose-reward box")
+            if hit:
+                keep_reward(hit[1], hit[2], f"{os.path.basename(hit[3])} (Resume)")
+                continue
+
         if popups and pop_taps < 8 and time.time() - last_pop > 2.5:
             pop = find(gray, popups, close_thr, "popup")
             if pop:
@@ -2012,6 +2113,8 @@ def watch_ad(cfg, base, log, home=None):
         # ---- close buttons -------------------------------------------------------------------
         if elapsed < wait_s:
             dlog(f"ad: waiting out the minimum ({wait_s}s) before looking for a close button")
+        elif now < reward_hold:
+            dlog(f"ad: the ad said closing loses the reward - {reward_hold - now:.0f}s more before closing")
         elif too_early:
             dlog("ad: still playing (progress bar or countdown) - not looking for a close button yet")
         else:
@@ -2028,9 +2131,10 @@ def watch_ad(cfg, base, log, home=None):
                     seen_now[k] = (near_seen.get(k, (0, None))[0] + 1, n)
             near_seen.clear()
             near_seen.update(seen_now)
-            sure = [v[1] for v in seen_now.values() if v[0] >= near_looks]
+            sure = [v[1] for k, v in seen_now.items() if v[0] >= near_looks and k not in near_tapped]
             if sure:
                 n = max(sure)
+                near_tapped.add((os.path.basename(n[3]), spot_of(n[1], n[2], W, H)))   # one try per spot
                 tap_button(n, "close", gray, f", in the same spot {near_looks} looks in a row")
                 continue
             ui = None
@@ -2043,6 +2147,15 @@ def watch_ad(cfg, base, log, home=None):
                     if ui_tried[k] > 2:                 # tapped twice already and still here: it isn't the way out
                         dlog(f"ad: skipping UI-tree button {ui[2][:40]!r} - tapping it twice didn't help")
                         ui = None
+            if ui and len(ui) > 3 and ui[3] == "resume":
+                keep_reward(ui[0], ui[1], repr(ui[2]))
+                continue
+            if ui and len(ui) > 3 and ui[3] == "store":
+                log("  a Play Store sheet is open over the ad - pressing BACK to return")
+                if time.time() - last_badge >= 20 and last_act and last_act[0] not in ("badge", "returned"):
+                    blame(last_act[0], last_act[1], last_act[3])
+                return_from_sheet()
+                continue
             if ui:
                 log(f"  close via UI tree: {ui[2][:50]!r}")
                 tap(ui[0], ui[1], jitter=2)
@@ -2061,8 +2174,9 @@ def watch_ad(cfg, base, log, home=None):
         # ---- the store badge -----------------------------------------------------------------
         # Watched for from the start (every other look, to save time) so that if it fades out
         # before it is needed, adwatch still knows where it was.
-        badge_due = stuck and risky_ok and quiet >= stuck_s and stuck_taps < max_stuck and time.time() - last_stuck > 10
-        if stuck and elapsed >= 3 and (badge_due or looks % 2 == 0):
+        badge_due = stuck and stuck_taps < max_stuck and time.time() - last_stuck > 10 and (
+            (risky_ok and quiet >= stuck_s) or (badge_now and badge_seen and time.time() - badge_seen[1] < 3))
+        if stuck and elapsed >= 3 and (badge_due or badge_now or looks % 2 == 0):
             seen, bnears = find_button(gray, stuck, stuck_thr, "store-badge", decoy_spots(), second_look=badge_due)
             if not seen:                                    # a faded badge: the same near-miss three looks running
                 cur = {}
@@ -2075,6 +2189,8 @@ def watch_ad(cfg, base, log, home=None):
                 if badge_seen is None:
                     dlog(f"ad: store badge {os.path.basename(seen[3])} seen at {seen[1]},{seen[2]} - remembered")
                 badge_seen = (seen, time.time())
+                if badge_now and stuck_taps < max_stuck and not badge_due:
+                    badge_due = True                       # just back from the store and the badge shows: press it
         if badge_due:
             hit = None
             if badge_seen and time.time() - badge_seen[1] < 3:
@@ -2111,10 +2227,22 @@ def watch_ad(cfg, base, log, home=None):
                 acted("badge", hit[3])
                 stuck_taps += 1
                 last_stuck = time.time()
-                if not left_game_within(pkg, 3):
+                last_badge = time.time()
+                badge_now = False
+                if left_game_within(pkg, 5):
+                    continue                                   # the store opened: handled at the top
+                if use_ui and store_sheet_open():
+                    # The store opened as a sheet over the ad (Android still says the ad is in front).
+                    log("  the store opened over the ad - pressing BACK to return")
+                    return_from_sheet()
+                    continue
+                again, _ = find_button(gray_screen(), [hit[3]], stuck_thr, "store-badge (still there?)", decoy_spots())
+                fg2, _a = focus()
+                if again and fg2 == pkg:
                     log("  the press didn't open the store - pressing again, dead centre and a bit longer")
-                    press(hit[1], hit[2], press_ms + 100, jitter=0)
+                    press(again[1], again[2], press_ms + 100, jitter=0)
                     acted("badge", hit[3])
+                    last_badge = time.time()
                 continue
 
         if teach_on and quiet >= next_teach:
@@ -2241,6 +2369,113 @@ def run_step(step, cfg, base, log):
     raise ValueError(f"unknown step: {step}")
 
 
+# ------------------------------------------------------------------ keep the computer awake
+KEEP_AWAKE = None    # None = the saved choice (on unless switched off); True/False = --keep-awake / --no-keep-awake
+
+
+def keep_awake_wanted():
+    if KEEP_AWAKE is not None:
+        return KEEP_AWAKE
+    if os.environ.get("ADWATCH_KEEP_AWAKE") in ("0", "1"):
+        return os.environ["ADWATCH_KEEP_AWAKE"] == "1"
+    return bool(load_state().get("keep_awake", True))
+
+
+class KeepAwake:
+    """Stops the computer from going to sleep while adwatch runs (the screen may still turn off).
+    Linux: a systemd-inhibit lock (sleep + idle) held by a small helper that ends by itself the
+    moment adwatch does, even after a crash. macOS: caffeinate. Windows: SetThreadExecutionState."""
+
+    def __init__(self, why):
+        self.why, self.proc, self.win, self.how = why, None, False, None
+
+    def start(self):
+        import shutil
+        me = str(os.getpid())
+        try:
+            if sys.platform.startswith("linux"):
+                inhibit = shutil.which("systemd-inhibit")
+                if not inhibit:
+                    return "systemd-inhibit isn't available (not a systemd system?)"
+                hold = ["tail", f"--pid={me}", "-f", "/dev/null"] if shutil.which("tail") else ["sleep", "infinity"]
+                self.proc = subprocess.Popen([inhibit, "--what=sleep:idle", "--who=adwatch", f"--why={self.why}",
+                                              "--mode=block", *hold],
+                                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                self.how = "systemd-inhibit"
+            elif sys.platform == "darwin":
+                if not shutil.which("caffeinate"):
+                    return "caffeinate isn't available"
+                self.proc = subprocess.Popen(["caffeinate", "-i", "-w", me], stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                self.how = "caffeinate"
+            elif sys.platform == "win32":
+                import ctypes
+                ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+                if not ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED):
+                    return "Windows refused the request"
+                self.win, self.how = True, "Windows power request"
+                return None
+            else:
+                return f"not supported on {sys.platform}"
+        except OSError as e:
+            return str(e)
+        try:                                     # refused straight away (e.g. no permission)?
+            self.proc.wait(timeout=0.5)
+            err = (self.proc.stderr.read() or b"").decode(errors="replace").strip()
+            self.proc = None
+            return err or "the helper stopped straight away"
+        except subprocess.TimeoutExpired:
+            return None
+
+    def stop(self):
+        if self.proc is not None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+        if self.win:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+            except Exception:
+                pass
+            self.win = False
+
+
+def keeps_awake(kind):
+    """Decorator for run / watch / keepalive: hold a keep-awake lock for as long as they run."""
+    import functools
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(args):
+            if not keep_awake_wanted() or os.environ.get("ADWATCH_AWAKE_HELD") == "1":
+                return fn(args)
+            game = os.path.splitext(os.path.basename(str(getattr(args, "profile", "") or "")))[0]
+            lock = KeepAwake(f"adwatch {kind}" + (f" ({game})" if game else ""))
+            problem = lock.start()
+            if problem:
+                print(time.strftime("%H:%M:%S"), f"couldn't keep the computer awake: {problem}", flush=True)
+                dlog(f"keep awake: failed - {problem}")
+            else:
+                print(time.strftime("%H:%M:%S"), f"keeping this computer awake while adwatch runs ({lock.how}; "
+                      "turn off in Settings or with --no-keep-awake)", flush=True)
+                dlog(f"keep awake: on ({lock.how})")
+            try:
+                return fn(args)
+            finally:
+                lock.stop()
+                if not problem:
+                    dlog("keep awake: released")
+        return wrapper
+    return deco
+
+
 def session_header(cfg, kind):
     """One block in the debug log describing the setup, so a log can be read on its own."""
     try:
@@ -2255,6 +2490,7 @@ def session_header(cfg, kind):
     dlog(f"SESSION steps: {json.dumps(cfg.get('steps', []))[:600]}")
 
 
+@keeps_awake("ad loop")
 def cmd_run(args):
     args.profile = resolve_profile(args.profile)
     with open(args.profile) as f:
@@ -2417,6 +2653,7 @@ def cmd_tidy(args):
 
 
 # ------------------------------------------------------------------ keepalive
+@keeps_awake("keepalive")
 def cmd_keepalive(args):
     """Run `run`/`watch` unattended: restart it after crashes, and after it stops on
     problems wait for control/restart (dropped by whoever fixed it) and start again.
@@ -2437,6 +2674,8 @@ def cmd_keepalive(args):
     env["ADWATCH_SCREEN"] = SCREEN_METHOD
     if not FAST_INPUT:
         env["ADWATCH_FAST_INPUT"] = "0"
+    if keep_awake_wanted():
+        env["ADWATCH_AWAKE_HELD"] = "1"               # this keepalive holds the lock for them
     os.makedirs(CONTROL_DIR, exist_ok=True)
     control_signal()                                   # ignore stale signals from earlier runs
     crashes = 0
@@ -2497,6 +2736,7 @@ def learn_home(cfg, log, force=False):
     return home
 
 
+@keeps_awake("watching for ads")
 def cmd_watch(args):
     """Passive mode: do nothing until an ad takes over the screen, then close it."""
     args.profile = resolve_profile(args.profile)
@@ -3556,12 +3796,18 @@ class Menu:
                 return pause()
             cfg = self.cfg()
             print(f" Game: {bold(self.game)}\n")
-            rows = []
+            awake = bool(load_state().get("keep_awake", True))
+            rows = [("Keep this computer awake while running", ("on" if awake else "off") + "   (all games)")]
             for key, default, lo, hi, kind, name, text in SETTINGS:
                 cur = cfg.get(key, default)
                 rows.append((name, "same as above" if cur is None else str(cur)))
             i = pick(rows, "Change which")
-            key, default, lo, hi, kind, name, text = SETTINGS[i]
+            if i == 0:
+                save_state(dict(load_state(), keep_awake=not awake))
+                print(green(f"   keep awake is now {'off' if awake else 'on'}") + dim(
+                    "" if awake else "  (the screen may still turn off; the computer won't sleep)"))
+                continue
+            key, default, lo, hi, kind, name, text = SETTINGS[i - 1]
             cur = cfg.get(key, default)
             print()
             ui_wrap(text)
@@ -3638,6 +3884,11 @@ def main():
                     help="adb screenshot format when not using --feed (default: auto = time both, use the faster)")
     ap.add_argument("--no-fast-taps", action="store_true",
                     help="send each tap as its own adb command (slower; for phones where fast taps misbehave)")
+    aw_grp = ap.add_mutually_exclusive_group()
+    aw_grp.add_argument("--keep-awake", dest="keep_awake", action="store_true", default=None,
+                        help="stop the computer from sleeping while adwatch runs (the default; see Settings)")
+    aw_grp.add_argument("--no-keep-awake", dest="keep_awake", action="store_false",
+                        help="let the computer sleep as usual")
     ap.add_argument("--feed", metavar="DEVICE", default=os.environ.get("ADWATCH_FEED"),
                     help="read the screen from scrcpy's video feed, e.g. /dev/video9 (Linux, see README)")
     sub = ap.add_subparsers(dest="cmd")
@@ -3699,7 +3950,8 @@ def main():
     stp = sub.add_parser("stamp", help="record the screen size older templates were captured on")
     stp.add_argument("width", type=int); stp.add_argument("height", type=int)
     args = ap.parse_args()
-    global SERIAL, VERBOSE, SCREEN_METHOD, FAST_INPUT
+    global SERIAL, VERBOSE, SCREEN_METHOD, FAST_INPUT, KEEP_AWAKE
+    KEEP_AWAKE = args.keep_awake
     if args.serial:
         SERIAL = args.serial
     if args.verbose:
