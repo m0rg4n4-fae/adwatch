@@ -39,7 +39,9 @@ Free-to-play games make you watch a lot of ads to get anywhere. adwatch runs on 
 - **Any game.** Nothing is built in for a particular game. A game is set up by boxing its button on a screenshot.
 - **Close buttons are shared.** Every ad "X" you save works in all your games, and a starter set ships with adwatch.
 - **Handles the awkward ads.** Ones that throw you into the Play Store, and ones you can only leave through the store.
-- **Any phone size.** Saved buttons are rescaled, so the same ones work on a different phone.
+- **Any phone size.** Saved buttons are rescaled, so the same ones work on a different phone, and in landscape ads.
+- **Clears the game's own pop-ups.** Level-up notices, daily rewards and the like are tapped, swiped away or closed with Back, however you saved them, so an unattended game doesn't stall.
+- **Keeps count.** How many ads it has gotten through, per game, per phone and in total (**Ad stats** in the menu, or `adwatch stats`).
 - **Nothing on the phone.** No root and no app to install. It only takes screenshots and sends taps.
 
 > [!NOTE]
@@ -93,14 +95,14 @@ In any prompt, Enter takes the value in `[brackets]`, `b` goes back, and Ctrl+C 
 
 adwatch never touches the game's data. It looks at the screen and taps it, the way you would.
 
-- **Seeing.** It takes a screenshot over adb and looks for the small pictures you saved. Matching uses outlines as well as brightness, so buttons that shimmer or glow are still found.
-- **Closing ads.** It tries your saved close buttons first, then asks Android for anything on screen labelled *Close* or *Skip*. If an ad opens the Play Store or a browser, it presses Back until the game is in front again.
+- **Seeing.** It takes a screenshot over adb and looks for the small pictures you saved. Matching uses outlines as well as brightness, so buttons that shimmer or glow are still found. Close buttons are looked for near the screen's edges, where ads put them, and a little smaller or larger than saved, since every ad draws its X a bit differently. Away from the edges a picture has to match almost perfectly, so a look-alike inside the video isn't tapped. A button that scores just under the limit, in the same spot look after look, is tapped too.
+- **Closing ads.** Skip buttons (*Skip*, *>>*, *Reward granted X*) are tapped as soon as they appear. Close buttons come next, then anything Android labels *Close* or *Skip*. If an ad opens the Play Store or a browser, it presses Back until the game is in front again.
 - **Knowing an ad is over.** In the ad loop, it waits until the game's own button is visible again before counting the ad as done. In watch mode, it checks which screen of the app is in front: full-screen ads run as a separate screen from the game.
-- **Not overdoing it.** It only taps things it has matched. If it can't close an ad it presses Back a few times, then gives up on that ad instead of tapping blindly.
+- **Not overdoing it.** It only taps things it has matched. If a tap sends you to the store (a wake press, a fake "Skip Video"), that button isn't used again in that spot, which is remembered for later runs too, and the ad gets a breather before anything else is tried. While a progress bar along the bottom is still moving, or a countdown ring in a corner is still ticking, it waits. An ad that has ended and shows nothing to tap gets Back after 20 seconds and is then given up on; so is one that keeps bouncing to the store or runs far too long. The ad loop then restarts the game and carries on.
 
 ## The starter set
 
-`adwatch/starter/` holds ad close buttons and store badges that are copied into every new user's collection on first start. If you've saved some that aren't in there, please share them:
+`adwatch/starter/` holds ad close buttons, skip buttons and store badges that are copied into every new user's collection on first start. If you've saved some that aren't in there, please share them:
 
 ```sh
 python adwatch.py pack     # copies yours into adwatch/starter/, skipping duplicates
@@ -116,7 +118,7 @@ Then open a pull request with the new files. They are small crops of ad close bu
 | From the folder (`python adwatch.py`) | that folder (`profiles/`, `templates/`) |
 | Either, with `ADWATCH_HOME` set | wherever it points |
 
-`templates/common/` is your collection of ad close buttons. It works on any phone and in any game, so you can copy it to a friend.
+`templates/common/` is your collection of ad close buttons, skip buttons and store badges. It works on any phone and in any game, so you can copy it to a friend. `stats.json` holds the ad counts and `decoys.json` the spots where a saved button turned out to open the store.
 
 ## Troubleshooting
 
@@ -127,6 +129,11 @@ Then open a pull request with the new files. They are small crops of ad close bu
 | It taps the wrong spot or opens the store | The box was too wide. Taps land in the middle of the box, so re-save it tightly around the button. |
 | An ad never gets closed | Run with pausing turned on and save its close button when it stops. |
 | An ad only lets you out through Google Play | **Teach it buttons → Store badge**. It is only used when no close button shows up. |
+| It keeps going to the store and back on one ad | It stops using whatever caused the trip in that spot, waits longer each time, and gives up after 5 trips (the ad loop then restarts the game). `logs/debug.log` shows which tap did it, and `decoys.json` lists the spots it now avoids. |
+| The game stalls on its own pop-up (level up, daily reward...) | **Teach it buttons → Game pop-up**: box its button and choose what to do (tap it, tap beside it, swipe it away, or Back). It's dealt with whenever it shows up: before each ad, when it hides the ad button, right after an ad, and every few seconds in watch mode. |
+| A Skip or "Reward granted" button waits until the ad is over | Save it as a skip button: **Teach it buttons → Skip button**, or `k` while paused. Skip buttons are tapped right away. |
+| A pop-up over the ad (like an "Install" bubble) blocks it | **Teach it buttons → Ad pop-up to tap away**, boxing the whole pop-up. Whenever it shows up, adwatch taps beside it. |
+| The store badge fades out and doesn't come back | Set a wake point in the middle of the ad (run with pausing on and press `w`). Points near the very top or bottom of the screen get swallowed by Android, so adwatch moves them in a little. |
 | Watch mode misses an ad | That ad is drawn inside the game's own screen. Answer yes to "Also check inside the game's own screen?". |
 | Watch mode calls a real game screen an ad | Put the game on that screen and run `adwatch watch GAME --learn`. |
 | The box-drawing window doesn't open | Tkinter is missing. See [Install](#install). |
@@ -149,11 +156,31 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 | `adwatch test GAME` | score every saved picture against the current screen |
 | `adwatch snap [OUT.png]` | save a screenshot |
 | `adwatch get-adb` | download Google's adb |
+| `adwatch stats` | how many ads have been watched, per game, per phone and in total |
 | `adwatch pack` | copy your saved ad buttons into the starter set |
+| `adwatch tidy [--yes]` | remove duplicate pictures, template folders no game uses, and old debug screenshots (asks first) |
 
-`grab` flags: `--then-ad` (tap it, then watch the ad), `--step` (just tap it), `--optional`, `--close` (an ad's X), `--stuck` (a store badge), `--open` (a button that opens the pop-up holding the ad button), `--ingame` (something only the game shows), `--delay N` (seconds before the screenshot).
+`grab` flags: `--then-ad` (tap it, then watch the ad), `--step` (just tap it), `--optional`, `--close` (an ad's X), `--skip` (a Skip, >> or "Reward granted X" button, tapped right away), `--stuck` (a store badge), `--popup` (a pop-up to tap away), `--misc` (one of the game's own pop-ups, with `--action tap|beside|swipe-up|swipe-down|swipe-left|swipe-right|back`), `--open` (a button that opens the pop-up holding the ad button), `--ingame` (something only the game shows), `--delay N` (seconds before the screenshot).
 
-`-s SERIAL` before the command picks a phone when several are connected.
+`-s SERIAL` before the command picks a phone when several are connected. `--screen raw|png|auto` picks the adb screenshot format (auto times both once and uses the faster: raw usually wins over USB, png over Wi-Fi). `--no-fast-taps` sends each tap as its own adb command, for phones where the faster way misbehaves. `-v` prints the detailed debug log as it runs; it is always written to `logs/debug.log` either way (screen-grab and matching times, every score, tap and key, and why each decision was made).
+
+`adwatch keepalive run GAME ...` (or `keepalive watch ...`) runs unattended: it restarts after a crash and, if adwatch stops because of repeated problems, waits for a file called `restart` in the `control/` folder before starting again. Everything is logged to `logs/adwatch.log`, and the screen is saved to `debug/` whenever something goes wrong.
+
+</details>
+
+<details>
+<summary>Faster screen reading (Linux, optional)</summary>
+
+An adb screenshot takes about half a second. scrcpy can instead send the phone's screen to a virtual webcam, which adwatch reads in a few milliseconds. That matters for buttons that only show for a moment.
+
+```sh
+sudo pacman -S v4l2loopback-dkms v4l2loopback-utils     # or your distro's v4l2loopback package
+sudo modprobe v4l2loopback video_nr=9 card_label=phone exclusive_caps=1
+scrcpy --v4l2-sink=/dev/video9 --video-bit-rate=16M --hwdec=disabled
+adwatch --feed /dev/video9 run GAME
+```
+
+If the feed can't be opened, or stops, adwatch goes back to adb screenshots by itself.
 
 </details>
 
@@ -170,6 +197,14 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 | `ad_max_seconds` | 90 | no close button by now: press Back |
 | `stuck_seconds` | 30 | no close button by now: use a saved store badge |
 | `cooldown_seconds` | 5 | ad loop: pause between ads |
+| `max_store_trips` | 5 | give up on an ad after this many trips to the store |
+| `ad_hard_max_seconds` | 240 | give up on an ad after this long, progress bar or not |
+| `no_exit_seconds` | 20 | an ad that has ended and shows nothing to tap gets Back after this long |
+| `skip_after_seconds` | 2 | skip buttons are tapped from this many seconds in |
+| `misc_check_seconds` | 5 | watch mode: how often to look for the game's own pop-ups |
+| `misc_max_per_minute` | 8 | at most this many pop-ups dealt with a minute, so a stubborn one can't keep it busy |
+| `restart_game_when_stuck` | true | ad loop: force-stop and reopen the game after giving up on an ad |
+| `max_restarts` | 5 | ad loop: most game restarts per run |
 
 </details>
 

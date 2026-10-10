@@ -14,3 +14,8 @@ __pycache__/
 /dist/
 .venv/
 venv/
+/logs/
+/control/
+/stats.json
+/decoys.json
+*.json.tmp
