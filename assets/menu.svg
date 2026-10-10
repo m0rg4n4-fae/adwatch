@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 708 513" width="708" height="513" role="img" aria-label="The adwatch menu in a terminal">
+<rect x="0.5" y="0.5" width="707" height="512" rx="12" fill="#14151f" stroke="#2c2e42"/>
+<path d="M0.5 36h707" stroke="#2c2e42"/>
+<circle cx="22" cy="18.5" r="5.5" fill="#5b6cff"/><circle cx="41" cy="18.5" r="5.5" fill="#9b5cf6"/><circle cx="60" cy="18.5" r="5.5" fill="#f472b6"/>
+<text x="354.0" y="23" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12.5" fill="#7d8590">adwatch</text>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,Liberation Mono,DejaVu Sans Mono,monospace" font-size="14" xml:space="preserve">
+<text x="22.0" y="58" fill="#8fa8ff" textLength="75.6" lengthAdjust="spacingAndGlyphs">$ adwatch</text>
+<text x="30.4" y="100" fill="#ffffff" font-weight="700" textLength="58.8" lengthAdjust="spacingAndGlyphs">adwatch</text>
+<text x="30.4" y="121" fill="#7d8590" textLength="520.8" lengthAdjust="spacingAndGlyphs">--------------------------------------------------------------</text>
+<text x="30.4" y="142" fill="#c9d1e6" textLength="42.0" lengthAdjust="spacingAndGlyphs">Phone</text>
+<text x="97.6" y="142" fill="#ffffff" font-weight="700" textLength="117.6" lengthAdjust="spacingAndGlyphs">Pixel 9 Pro XL</text>
+<text x="232.0" y="142" fill="#7d8590" textLength="142.8" lengthAdjust="spacingAndGlyphs">192.168.1.24:5555</text>
+<text x="30.4" y="163" fill="#c9d1e6" textLength="33.6" lengthAdjust="spacingAndGlyphs">Game</text>
+<text x="97.6" y="163" fill="#ffffff" font-weight="700" textLength="75.6" lengthAdjust="spacingAndGlyphs">idleminer</text>
+<text x="190.0" y="163" fill="#7d8590" textLength="302.4" lengthAdjust="spacingAndGlyphs">com.fluffyfairygames.idleminertycoon</text>
+<text x="30.4" y="184" fill="#c9d1e6" textLength="33.6" lengthAdjust="spacingAndGlyphs">Loop</text>
+<text x="97.6" y="184" fill="#c9d1e6" textLength="327.6" lengthAdjust="spacingAndGlyphs">tap &#x27;boost&#x27; &gt; watch the ad and close it</text>
+<text x="30.4" y="205" fill="#c9d1e6" textLength="25.2" lengthAdjust="spacingAndGlyphs">Ads</text>
+<text x="97.6" y="205" fill="#c9d1e6" textLength="487.2" lengthAdjust="spacingAndGlyphs">5 close buttons, 1 store badge saved (shared by all games)</text>
+<text x="47.2" y="247" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">1</text>
+<text x="72.4" y="247" fill="#c9d1e6" textLength="126.0" lengthAdjust="spacingAndGlyphs">Run the ad loop</text>
+<text x="265.6" y="247" fill="#7d8590" textLength="411.6" lengthAdjust="spacingAndGlyphs">taps the ad button, waits, closes the ad, repeats</text>
+<text x="47.2" y="268" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">2</text>
+<text x="72.4" y="268" fill="#c9d1e6" textLength="168.0" lengthAdjust="spacingAndGlyphs">Watch for pop-up ads</text>
+<text x="265.6" y="268" fill="#7d8590" textLength="411.6" lengthAdjust="spacingAndGlyphs">you play; it closes ads that appear by themselves</text>
+<text x="47.2" y="289" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">3</text>
+<text x="72.4" y="289" fill="#c9d1e6" textLength="134.4" lengthAdjust="spacingAndGlyphs">Teach it buttons</text>
+<text x="265.6" y="289" fill="#7d8590" textLength="378.0" lengthAdjust="spacingAndGlyphs">the ad button, ad close buttons, store badges</text>
+<text x="47.2" y="310" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">4</text>
+<text x="72.4" y="310" fill="#c9d1e6" textLength="33.6" lengthAdjust="spacingAndGlyphs">Test</text>
+<text x="265.6" y="310" fill="#7d8590" textLength="420.0" lengthAdjust="spacingAndGlyphs">check the saved buttons against the phone&#x27;s screen</text>
+<text x="47.2" y="331" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">5</text>
+<text x="72.4" y="331" fill="#c9d1e6" textLength="42.0" lengthAdjust="spacingAndGlyphs">Games</text>
+<text x="265.6" y="331" fill="#7d8590" textLength="235.2" lengthAdjust="spacingAndGlyphs">switch game or add a new one</text>
+<text x="47.2" y="352" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">6</text>
+<text x="72.4" y="352" fill="#c9d1e6" textLength="42.0" lengthAdjust="spacingAndGlyphs">Phone</text>
+<text x="265.6" y="352" fill="#7d8590" textLength="294.0" lengthAdjust="spacingAndGlyphs">switch phone, or how to connect one</text>
+<text x="47.2" y="373" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">7</text>
+<text x="72.4" y="373" fill="#c9d1e6" textLength="67.2" lengthAdjust="spacingAndGlyphs">Settings</text>
+<text x="265.6" y="373" fill="#7d8590" textLength="352.8" lengthAdjust="spacingAndGlyphs">timings and match strictness for this game</text>
+<text x="47.2" y="394" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">8</text>
+<text x="72.4" y="394" fill="#c9d1e6" textLength="117.6" lengthAdjust="spacingAndGlyphs">Check my setup</text>
+<text x="265.6" y="394" fill="#7d8590" textLength="319.2" lengthAdjust="spacingAndGlyphs">is everything installed and connected?</text>
+<text x="47.2" y="415" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">9</text>
+<text x="72.4" y="415" fill="#c9d1e6" textLength="33.6" lengthAdjust="spacingAndGlyphs">Help</text>
+<text x="265.6" y="415" fill="#7d8590" textLength="260.4" lengthAdjust="spacingAndGlyphs">what this does and how to start</text>
+<text x="47.2" y="436" fill="#8fa8ff" textLength="8.4" lengthAdjust="spacingAndGlyphs">q</text>
+<text x="72.4" y="436" fill="#c9d1e6" textLength="33.6" lengthAdjust="spacingAndGlyphs">Quit</text>
+<text x="30.4" y="478" fill="#c9d1e6" textLength="58.8" lengthAdjust="spacingAndGlyphs">Choose:</text>
+<rect x="100.6" y="465" width="8" height="16" fill="#8fa8ff"/>
+</g>
+</svg>

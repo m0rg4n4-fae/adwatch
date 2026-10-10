@@ -1,0 +1,16 @@
+# your own games, saved buttons and settings (kept next to the code when you run `python adwatch.py`)
+/profiles/
+/templates/
+/debug/
+/platform-tools/
+.adwatch_state.json
+snap_*.png
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.venv/
+venv/

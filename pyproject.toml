@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adwatch"
+dynamic = ["version"]
+description = "Automates the ads in Android games: taps the reward-ad button, waits out the ad and closes it."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["android", "adb", "automation", "games", "opencv"]
+dependencies = ["opencv-python", "numpy"]
+
+[project.urls]
+Homepage = "https://github.com/m0rg4n4-fae/adwatch"
+Issues = "https://github.com/m0rg4n4-fae/adwatch/issues"
+
+[project.scripts]
+adwatch = "adwatch.cli:main"
+
+[tool.setuptools]
+packages = ["adwatch"]
+
+[tool.setuptools.dynamic]
+version = { attr = "adwatch.cli.__version__" }
+
+[tool.setuptools.package-data]
+adwatch = ["starter/*"]
