@@ -407,16 +407,17 @@ def gray_screen():
     return cv2.cvtColor(LAST_FRAME, cv2.COLOR_BGR2GRAY)
 
 
-def progress_bar(frame):
+def progress_bar(frame, edge="bottom"):
     """Length (0-1 of the screen width) of a coloured bar running from the left along the
-    bottom of the screen - the progress line many video ads show - or None.
+    bottom (or, with edge="top", the top) of the screen - the progress line many video ads
+    show (Google's end screens put a yellow one along the top) - or None.
     Rows must be solidly coloured from the left edge; two neighbouring rows must agree, so
     text and buttons don't count. A bar only means "still playing" when its length changes."""
     if frame is None or frame.ndim != 3:
         return None
     h, w = frame.shape[:2]
-    band = frame[int(h * 0.94):]
-    hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
+    band = frame[int(h * 0.94):] if edge == "bottom" else frame[:int(h * 0.06)][::-1]
+    hsv = cv2.cvtColor(np.ascontiguousarray(band), cv2.COLOR_BGR2HSV)
     colored = (hsv[..., 1] > 70) & (hsv[..., 2] > 80)
     lengths = []
     for row in colored:
@@ -1282,11 +1283,45 @@ def load_decoys():
             for k, n in (saved.get(kind) or {}).items():
                 if isinstance(n, int):
                     DECOYS[kind][k] = max(DECOYS[kind].get(k, 0), n)
+        for k, rec in (saved.get("near") or {}).items():
+            if isinstance(rec, dict):
+                DECOYS.setdefault("near", {})[k] = {n: int(rec.get(n, 0)) for n in ("tapped", "closed")}
+        for k, rec in (saved.get("wake") or {}).items():
+            if isinstance(rec, dict):
+                DECOYS.setdefault("wake", {})[k] = {n: int(rec.get(n, 0)) for n in ("store", "badge")}
         DECOYS["_loaded"] = True
 
 
 def save_decoys():
-    _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"]})
+    _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"], "wake": DECOYS.get("wake", {}),
+                            "near": DECOYS.get("near", {})})
+
+
+_WAKE_SKIP_SAID = set()   # ad kinds already told about (said once per run)
+
+
+def near_record(name, outcome=None):
+    """Track record of near-miss taps on a close picture; `outcome` ("tapped"/"closed") adds to it."""
+    rec = DECOYS.setdefault("near", {}).setdefault(name, {"tapped": 0, "closed": 0})
+    if outcome:
+        rec[outcome] += 1
+        save_decoys()
+    return rec
+
+
+def near_useless(name, tries=6):
+    """A picture whose near-misses have been tapped `tries` times without the ad ever closing."""
+    rec = DECOYS.get("near", {}).get(name) or {}
+    return rec.get("tapped", 0) >= tries and not rec.get("closed", 0)
+
+
+def wake_record(ad_kind, outcome=None):
+    """How the wake press has done on this kind of ad screen; `outcome` ("store"/"badge") adds to it."""
+    rec = DECOYS.setdefault("wake", {}).setdefault(ad_kind or "?", {"store": 0, "badge": 0})
+    if outcome:
+        rec[outcome] += 1
+        save_decoys()
+    return rec
 
 
 _PHONE_NAME = {}
@@ -1755,6 +1790,11 @@ def recover(cfg, base, log, attempts=6):
             continue
         if backs >= 2:
             break
+        if fg == pkg and act in set(cfg.get("home_activities", [])):
+            # The game's own screen with nothing to close: BACK there tends to bring up the
+            # game's "leave the game?" box rather than going anywhere useful.
+            dlog("recover: the game's own screen is in front - not pressing BACK")
+            break
         backs += 1
         log("  recover: pressing BACK")
         key("KEYCODE_BACK")
@@ -1763,7 +1803,9 @@ def recover(cfg, base, log, attempts=6):
     return False
 
 
-DECOYS = {"ui": {}, "close": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store
+DECOYS = {"ui": {}, "close": {}, "wake": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store;
+# "wake": ad screen name -> {"store": wake presses that opened the store, "badge": ones that brought the badge up}
+# "near": close picture -> {"tapped": near-miss taps on it, "closed": ones the ad closed right after}
 LAST_AD_END = {"why": None}        # why the last watch_ad gave up: "timeout" or "store-loop"
 
 
@@ -1814,8 +1856,10 @@ def watch_ad(cfg, base, log, home=None):
     max_s = cfg.get("ad_max_seconds", 90)
     hard_max = cfg.get("ad_hard_max_seconds", 240)     # whatever the progress bar says
     bar_close = cfg.get("bar_close_fraction", 0.75)    # active mode: no close taps while a moving bar is below this
+    bar_stall = cfg.get("bar_stall_seconds", 15)       # ...nor for this long after it stops short of that (buffering)
     still_need = cfg.get("still_before_close", 3) or 3  # seconds without video motion that mean "it has ended"
     done_min = None if passive else cfg.get("finished_min_seconds")   # earliest close once the ad is seen to have ended
+    bar_done_min = cfg.get("bar_done_min_seconds", 8)  # earliest close once a progress bar has run to the end
     skip_after = cfg.get("skip_after_seconds", 2)
     no_exit_s = cfg.get("no_exit_seconds", 20)         # an ad that has ended and offers nothing for this long: BACK
     near_looks = cfg.get("near_miss_looks", 3)
@@ -1840,12 +1884,18 @@ def watch_ad(cfg, base, log, home=None):
     answer_taps, max_answers = 0, cfg.get("max_answer_taps", 12)
     wake = cfg.get("wake_tap")            # [x, y] fractions; a tap that makes a faded badge reappear
     wake_taps, last_wake, wake_blocked = 0, 0.0, False
+    wake_worked = False                   # a wake press has brought the badge up on this ad
+    blind_wakes = cfg.get("wake_tries_without_badge", 3)
+    tap_shot = None                       # (screen, x, y) of the last tap, saved if it opens the store
+    last_near = None                      # (picture, time) of the last near-miss tap
+    near_tries = cfg.get("near_miss_tries", 6)
+    ad_kind = None                        # the ad's screen name (AdActivity, AppLovinFullscreenActivity...)
     teach_on = bool(cfg.get("_teach"))
     next_teach = cfg.get("teach_after", 45)
     store_trips, hold_until, last_act = 0, 0.0, None
     load_decoys()
     blocked_ui, blocked_spots = set(), set()
-    bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = [], 0.0, False, None, False
+    bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = {}, 0.0, False, None, False
     ring, said_ring = CountdownRing(), False
     prev_small, looks, video_looks, last_video, said_ended = None, 0, 0, 0.0, False
     near_seen, near_tapped, game_looks = {}, set(), 0
@@ -1861,15 +1911,33 @@ def watch_ad(cfg, base, log, home=None):
     def decoy_spots():
         return blocked_spots | {tuple(k.rsplit("@", 1)) for k, n in DECOYS["close"].items() if n >= 2 and "@" in k}
 
-    def acted(kind, detail="", where=None):
-        nonlocal last_act
+    def acted(kind, detail="", where=None, shot=None):
+        nonlocal last_act, tap_shot
         last_act = (kind, detail, time.time(), where)
+        tap_shot = shot
+
+    def save_tap_shot(what):
+        """Keep the screen a store-opening tap was made on, with the spot circled, for working out why."""
+        if not tap_shot or tap_shot[0] is None:
+            return
+        try:
+            img = cv2.cvtColor(tap_shot[0], cv2.COLOR_GRAY2BGR) if tap_shot[0].ndim == 2 else tap_shot[0].copy()
+            cv2.circle(img, (int(tap_shot[1]), int(tap_shot[2])), 45, (0, 0, 255), 4)
+            dbg = os.path.join(DATA_DIR, "debug")
+            os.makedirs(dbg, exist_ok=True)
+            name = time.strftime("%Y%m%d-%H%M%S") + "_opened-store-" + re.sub(r"[^a-z0-9]+", "-", what.lower()).strip("-")[:30] + ".png"
+            cv2.imwrite(os.path.join(dbg, name), img)
+            log(f"  saved the screen it was tapped on to debug/{name}")
+        except Exception:
+            pass
 
     def blame(kind, detail, where):
         """Something we tapped opened the store: don't tap it again on this ad (there)."""
         nonlocal wake_blocked, pop_pick
+        save_tap_shot(os.path.basename(detail) if detail else kind)
         if kind == "wake":
             wake_blocked = True
+            wake_record(ad_kind, "store")
             log("  the wake press opened the store - not using it again on this ad")
         elif kind == "ui":
             blocked_ui.add(detail)
@@ -1888,6 +1956,8 @@ def watch_ad(cfg, base, log, home=None):
 
     def finish(result, why=None):
         LAST_AD_END["why"] = why
+        if result is True and last_near and time.time() - last_near[1] < 8:
+            near_record(last_near[0], "closed")           # the near-miss tap was the way out
         if result is not None:
             record_ad(pkg, "gave_up" if result is False else "watched", time.time() - start)
         return result
@@ -1935,7 +2005,7 @@ def watch_ad(cfg, base, log, home=None):
         H, W = (gray.shape[:2] if gray is not None else screen_size()[::-1])
         log(f"  close button {os.path.basename(hit[3])} ({hit[0]:.2f}){note}")
         tap(hit[1], hit[2], jitter=2)
-        acted(kind, hit[3], spot_of(hit[1], hit[2], W, H))
+        acted(kind, hit[3], spot_of(hit[1], hit[2], W, H), shot=(gray, hit[1], hit[2]))
         closed_once = True
         near_seen.clear()
         nap(2)
@@ -1960,6 +2030,8 @@ def watch_ad(cfg, base, log, home=None):
 
         # An ad click-through opened the store / a browser: go back to the game.
         fg, act = focus()
+        if act and (fg == pkg or foreign_ad(fg, act)) and is_ad_activity(act, cfg.get("ad_activities", [])):
+            ad_kind = act.rsplit(".", 1)[-1]
         if fg and fg != pkg and foreign_ad(fg, act):
             dlog(f"ad: shown by another app ({fg} / {act.rsplit('.', 1)[-1]}) - part of the ad")
         elif fg and fg != pkg and (fg not in IGNORED_FOREGROUND or app_chooser(fg, act)):
@@ -1970,6 +2042,14 @@ def watch_ad(cfg, base, log, home=None):
             cause = last_act if last_act and time.time() - last_act[2] < 10 else None
             if time.time() - last_badge < 20:              # the badge was pressed: this is the intended trip
                 cause = ("badge", "", last_badge, None)
+            elif cause and cause[0] in ("close", "skip") and stuck and tap_shot and tap_shot[0] is not None:
+                # A "close" picture that sits on the store badge (its play-and-bar symbol, say):
+                # the tap was a badge press, and the store is the way out - not a decoy.
+                bh = find(tap_shot[0], stuck, stuck_thr)
+                if bh and abs(bh[1] - tap_shot[1]) < 60 and abs(bh[2] - tap_shot[2]) < 60:
+                    log(f"  that tap was on the store badge ({os.path.basename(bh[3])}) - the way out, not a decoy")
+                    cause = ("badge", "", time.time(), None)
+                    last_badge = time.time()
             how = {"wake": "the wake press", "ui": "a labelled button", "close": "a close picture", "skip": "a skip button",
                    "popup": "the tap beside a pop-up", "badge": "the store badge"}.get(cause[0]) if cause else None
             log(f"  left the game ({fg}){' after ' + how if how else ''}, pressing BACK to return")
@@ -2010,14 +2090,21 @@ def watch_ad(cfg, base, log, home=None):
         looks += 1
 
         # ---- is the ad still playing? ------------------------------------------------------
-        frac = progress_bar(LAST_FRAME)
-        if frac is not None:
-            bar_at = frac
-            bar_hist = [(t, f) for t, f in bar_hist if now - t < 8] + [(now, frac)]
-            fs = [f for _, f in bar_hist]
+        seen_bars, moving_bar = {}, None
+        for edge in ("bottom", "top"):                  # each edge on its own: a still strip at one
+            frac = progress_bar(LAST_FRAME, edge)      # mustn't hide a moving bar at the other
+            if frac is None:
+                continue
+            seen_bars[edge] = frac
+            hist = [(t, f) for t, f in bar_hist.get(edge, []) if now - t < 8] + [(now, frac)]
+            bar_hist[edge] = hist
+            fs = [f for _, f in hist]
             if len(fs) >= 2 and max(fs) - min(fs) >= 0.004 and frac < 0.995:
                 last_moving = now
                 bar_seen_moving = True
+                moving_bar = frac
+        if seen_bars:
+            bar_at = moving_bar if moving_bar is not None else seen_bars.get("bottom", seen_bars.get("top"))
         bar_running = bool(last_moving) and now - last_moving < 4
         ticking = ring.update(gray, now) if gray is not None else False
         if ticking:
@@ -2034,7 +2121,7 @@ def watch_ad(cfg, base, log, home=None):
                     last_video = now
         playing = bar_running or ticking
         if playing and not said_playing:
-            log("  ad still playing (" + (f"progress bar at {frac:.0%}" if bar_running and frac is not None else
+            log("  ad still playing (" + (f"progress bar at {bar_at:.0%}" if bar_running and bar_at is not None else
                                           "countdown ring") + ") - holding off until it finishes")
         elif said_playing and not playing:
             dlog("ad: progress bar / countdown stopped")
@@ -2052,12 +2139,17 @@ def watch_ad(cfg, base, log, home=None):
             said_ended = True
         risky_ok = not playing and now >= hold_until
         # A rewarded video that is visibly still running: leave its close-looking pictures alone.
-        too_early = not passive and ((bar_running and (bar_at or 0) < bar_close) or ticking)
+        too_early = not passive and ((bar_running and (bar_at or 0) < bar_close) or ticking or (
+            bar_seen_moving and (bar_at or 0) < bar_close and now - last_moving < bar_stall))
         wait_s = min_s
         if done_min is not None and ended:
             wait_s = min(min_s, done_min)
-            if wait_s <= elapsed < min_s:
-                dlog(f"ad: looks finished after {elapsed:.0f}s - not waiting out the full {min_s}s")
+        if ended and bar_seen_moving and (bar_at or 0) >= 0.9 and bar_done_min is not None:
+            # The video's own progress bar ran (nearly) to the end: it is over, whatever the usual
+            # minimum is. (If a reward ad still objects, its "lose your reward" box gets RESUME.)
+            wait_s = min(wait_s, bar_done_min)
+        if wait_s <= elapsed < min_s:
+            dlog(f"ad: looks finished after {elapsed:.0f}s - not waiting out the full {min_s}s")
 
         # ---- the game is back? ---------------------------------------------------------------
         if back_in_game and elapsed > 4:
@@ -2132,8 +2224,14 @@ def watch_ad(cfg, base, log, home=None):
             near_seen.clear()
             near_seen.update(seen_now)
             sure = [v[1] for k, v in seen_now.items() if v[0] >= near_looks and k not in near_tapped]
+            for v in [v for v in sure if near_useless(os.path.basename(v[3]), near_tries)]:
+                sure.remove(v)
+                near_tapped.add((os.path.basename(v[3]), spot_of(v[1], v[2], W, H)))
+                dlog(f"ad: near-miss {os.path.basename(v[3])} skipped - its near-misses have never closed an ad")
             if sure:
                 n = max(sure)
+                near_record(os.path.basename(n[3]), "tapped")
+                last_near = (os.path.basename(n[3]), time.time())
                 near_tapped.add((os.path.basename(n[3]), spot_of(n[1], n[2], W, H)))   # one try per spot
                 tap_button(n, "close", gray, f", in the same spot {near_looks} looks in a row")
                 continue
@@ -2159,7 +2257,7 @@ def watch_ad(cfg, base, log, home=None):
             if ui:
                 log(f"  close via UI tree: {ui[2][:50]!r}")
                 tap(ui[0], ui[1], jitter=2)
-                acted("ui", ui[2])
+                acted("ui", ui[2], shot=(gray, ui[0], ui[1]))
                 closed_once = True
                 nap(2)
                 continue
@@ -2195,6 +2293,15 @@ def watch_ad(cfg, base, log, home=None):
             hit = None
             if badge_seen and time.time() - badge_seen[1] < 3:
                 hit = badge_seen[0]
+            elif (wake and not wake_blocked and not (wake_worked or badge_seen)
+                  and wake_record(ad_kind)["store"] >= 2 and not wake_record(ad_kind)["badge"]):
+                wake_blocked = True                        # learned: on this kind of ad the wake press is a click on the ad
+                (dlog if ad_kind in _WAKE_SKIP_SAID else log)(
+                    f"  the wake press has only ever opened the store on this kind of ad ({ad_kind}) - not using it")
+                _WAKE_SKIP_SAID.add(ad_kind)
+            elif wake and not wake_blocked and not (wake_worked or badge_seen) and wake_taps >= blind_wakes:
+                wake_blocked = True                        # this ad has no badge that a touch brings back
+                log(f"  {wake_taps} wake presses and no badge showed up - not using the wake point again on this ad")
             elif wake and not wake_blocked and wake_taps < 15 and time.time() - last_wake > 4:
                 fx, fy, moved = safe_point(*wake)
                 if moved and not wake_taps:
@@ -2202,7 +2309,7 @@ def watch_ad(cfg, base, log, home=None):
                         f"using {fy:.2f} down instead of {wake[1]:.2f})")
                 log("  badge not visible - pressing the wake point to bring it back")
                 press(int(fx * W), int(fy * H), press_ms)
-                acted("wake")
+                acted("wake", shot=(gray, int(fx * W), int(fy * H)))
                 wake_taps += 1
                 last_wake = time.time()
                 # The badge fades in, stays a moment and fades out: look again and again right away.
@@ -2211,6 +2318,9 @@ def watch_ad(cfg, base, log, home=None):
                     hit, _ = find_button(gray_screen(), stuck, stuck_thr, "store-badge (after wake)", decoy_spots())
                     if not hit:
                         nap(0.05, 0)
+                if hit and not wake_worked:
+                    wake_record(ad_kind, "badge")
+                wake_worked = wake_worked or bool(hit)
                 if not hit and badge_seen:
                     hit = badge_seen[0]
                     log("  the badge didn't come back into view - pressing where it was")
@@ -2239,10 +2349,18 @@ def watch_ad(cfg, base, log, home=None):
                 again, _ = find_button(gray_screen(), [hit[3]], stuck_thr, "store-badge (still there?)", decoy_spots())
                 fg2, _a = focus()
                 if again and fg2 == pkg:
-                    log("  the press didn't open the store - pressing again, dead centre and a bit longer")
-                    press(again[1], again[2], press_ms + 100, jitter=0)
+                    # Some badges ignore a held press but react to a plain quick tap (the way a finger taps).
+                    log("  the press didn't open the store - tapping it again, dead centre and quick")
+                    tap(again[1], again[2], jitter=0)
                     acted("badge", hit[3])
                     last_badge = time.time()
+                    if left_game_within(pkg, 5):
+                        continue                               # the store opened: handled at the top
+                    if use_ui and store_sheet_open():
+                        log("  the store opened over the ad - pressing BACK to return")
+                        return_from_sheet()
+                        continue
+                    snapshot("badge-did-nothing", log)
                 continue
 
         if teach_on and quiet >= next_teach:
@@ -2306,9 +2424,17 @@ def run_step(step, cfg, base, log):
         if step.get("open", step is first_tap):
             open_paths = expand(cfg.get("open_templates", []), base, quiet=True)
         open_taps, t0 = 0, time.time()
+        open_wait = cfg.get("open_wait_seconds", 6)
         deadline = time.time() + step.get("timeout", 10)
         best, last = 0.0, None
         while time.time() < deadline:
+            # An ad the game showed by itself (when it starts, between screens...): see it out first.
+            fg, act = focus()
+            if act and (fg == cfg["package"] or foreign_ad(fg, act)) and is_ad_activity(act, cfg.get("ad_activities", [])):
+                log(f"  an ad came up by itself ({act.rsplit('.', 1)[-1]}) - dealing with it first")
+                watch_ad(cfg, base, log)
+                deadline = max(deadline, time.time() + step.get("timeout", 10))
+                continue
             last = gray_screen()
             ranked = score_all(last, paths, stop_at=max(thr, 0.92))
             dlog(f"step {os.path.basename(str(step['tap']))}: best "
@@ -2328,13 +2454,16 @@ def run_step(step, cfg, base, log):
                 continue
             # Only open when the target is clearly absent (a near-miss means the pop-up
             # is already open, and tapping the opener again could close it).
-            if open_paths and open_taps < 2 and now_best < 0.6 and time.time() - t0 > 1.5:
-                oh = find(last, open_paths, thr)
+            # Openers can be a route (a menu button, then an item in that menu): listed in order,
+            # the furthest one along that is showing is tapped, so a menu already open isn't closed.
+            if open_paths and open_taps < len(open_paths) + 1 and now_best < 0.6 and time.time() - t0 > 1.5:
+                oh = next((h for h in (find(last, [p], thr) for p in reversed(open_paths)) if h), None)
                 if oh:
-                    log(f"  boost not showing - tapping opener {os.path.basename(oh[3])} ({oh[0]:.2f})")
+                    log(f"  {os.path.basename(paths[0]) if paths else 'the button'} not showing - "
+                        f"tapping {os.path.basename(oh[3])} ({oh[0]:.2f}) to get to it")
                     tap(oh[1], oh[2])
                     open_taps += 1
-                    deadline = max(deadline, time.time() + 6)
+                    deadline = max(deadline, time.time() + open_wait)
                     nap(2.0)
                     continue
             nap(0.5, 0.1)

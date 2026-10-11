@@ -4,6 +4,23 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Supervised run fixes (Oct 10)
+- **No more waiting out the minimum after a video has visibly finished.** When an ad's progress bar runs to the end, its X is tapped after `bar_done_min_seconds` (8) instead of the game's full minimum (30 s for Power Spin Quest after a reward ad). A TikTok ad sat with its X showing for 19 seconds. If a reward ad still objects, its "lose your reward" box gets RESUME as before.
+- **More pictures ship with adwatch** (`adwatch/starter/`): 11 more close buttons (plain X's and the blue "CLOSE"), 5 Google Play badges (including the faint grey pill and the round "▶|" one), Google's "Reward granted ✕" and a "▶▶|" skip button. They were picked by their record in real runs, and none have the ad's own background baked in.
+- **Other phones:** a new test replays real ad screenshots resized to 720p (budget phones such as a Moto G or TCL) and 1440p, and checks adwatch finds the same buttons in the same places. Two stale tests were fixed too (they had stopped matching how adwatch reads the phone).
+- **A progress bar that vanishes part-way** no longer lets the ad loop start tapping close buttons 4 seconds later: while the last bar seen was below `bar_close_fraction`, it holds off for up to `bar_stall_seconds` (15). A reward ad got a "Close ad? You will lose your reward" this way.
+- **The way to the ad button can take several taps.** `open_templates` can list a route, such as a menu button and then an item in that menu. When the ad button isn't showing, adwatch taps the furthest step along that it can see, so a menu that's already open isn't closed again. `open_wait_seconds` gives a loading screen time to finish.
+- **Ads the game shows by itself** (when it starts, between screens) while the ad loop is looking for the ad button are now dealt with first, instead of the button search failing.
+- **No more BACK on the game's own screen when recovering.** In Power Spin Quest, BACK there brings up "Leave the game? Are you sure?". adwatch now goes straight to restarting the game instead.
+- **A "close" picture that sits on the store badge** (the same play-and-bar symbol) now counts as a badge press when it opens the store: it's the way out, so it isn't marked as a decoy and the ad gets no breather.
+- Progress bars along the **top** of the screen are now noticed too (Google's AdMob end screens show a yellow one there and only show their X when it fills). adwatch used to think those ads had ended and press BACK. Each edge is tracked on its own, so a still coloured strip at one edge can't hide a moving bar at the other.
+- adwatch keeps a track record of "nearly matching" close pictures (in `decoys.json`). A picture whose near-matches have been tapped 6 times without the ad ever closing is no longer tapped on a near-match (a full match still counts). The ">>" arrow had been tapped 20 times for nothing. Change the number with `near_miss_tries`.
+- The note that the wake press is being skipped on a kind of ad is shown once per run instead of on every ad.
+- When a press on the store badge does nothing, the second try is a plain quick tap instead of a longer press (the MISTPLAY ad's "Google Play" pill ignored held presses but works with a finger tap). If that does nothing either, the screen is saved to `debug/`.
+- The wake press is only tried 3 times on an ad where no badge has shown up (it used to be up to 15). On ads without a fading badge it was pressing the ad itself, which opened the store. Change it with `wake_tries_without_badge`.
+- adwatch remembers how the wake press does on each kind of ad (by its screen name, in `decoys.json`). Where it has opened the store twice and never brought the badge up (Google's AdMob video ads, where any touch is a click on the ad), it isn't used at all.
+- When a tap opens the store, the screen it was made on is saved to `debug/` with the spot circled, so the culprit can be found.
+
 ### Ads you leave through the Play Store (Oct 10)
 - Pressing the store badge often opens the Play Store as a sheet *over* the ad, and Android still reports the ad as the screen in front. adwatch used to think the press hadn't worked and press again, inside the store sheet. It then took the store's own "Close sheet" for an ad button and called it a decoy. Now:
   - It waits up to 5 seconds for the store.
