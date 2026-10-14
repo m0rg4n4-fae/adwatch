@@ -195,6 +195,11 @@ NO_ADB = ("adb (the tool that talks to the phone) isn't installed. Run `adwatch 
 LAST_ERR = ""
 
 
+# A screenshot normally takes well under a second (raw, over USB, even at 2960x1440); one that
+# hangs is given up on after this long and taken the other way, instead of adb's usual 30 s.
+SCREENCAP_TIMEOUT = {"raw": 10, "png": 20}
+
+
 def adb(*args, binary=False, timeout=30):
     global LAST_ERR
     cmd = [ADB] + (["-s", SERIAL] if SERIAL else []) + list(args)
@@ -285,17 +290,24 @@ class VideoFeed:
 
 
 SCREEN_METHOD = os.environ.get("ADWATCH_SCREEN", "auto")   # auto | png | raw
-_SCREEN = {"method": None}
+_SCREEN = {"method": None, "raw_fails": 0}
+RAW_FAILS_BEFORE_PNG = 3     # one unreadable raw shot (the screen turning mid-capture) is no reason to give up on raw
+# Optional hooks for programs that import adwatch and already hold a faster way to the phone
+# (a uiautomator2 connection, say). CAPTURE_HOOK() returns a BGR frame or None; INPUT_HOOK(args)
+# gets what would follow `input` ("tap 10 20", "swipe x1 y1 x2 y2 ms", "keyevent KEYCODE_BACK")
+# and returns True if it did it. Either falling through, or raising, uses adb as usual.
+CAPTURE_HOOK = None
+INPUT_HOOK = None
 
 
 def _grab_png():
-    return _decode(adb("exec-out", "screencap", "-p", binary=True))
+    return _decode(adb("exec-out", "screencap", "-p", binary=True, timeout=SCREENCAP_TIMEOUT["png"]))
 
 
 def _grab_raw():
     """Uncompressed screencap: no PNG encoding on the phone (often the slow part), but about
     10 MB to transfer, so it wins over USB and can lose over Wi-Fi."""
-    data = adb("exec-out", "screencap", binary=True)
+    data = adb("exec-out", "screencap", binary=True, timeout=SCREENCAP_TIMEOUT["raw"])
     if len(data) < 16:
         return None
     w, h, fmt = struct.unpack_from("<III", data, 0)
@@ -327,7 +339,9 @@ def _adb_screenshot():
                     best = dt if best is None else min(best, dt)
             if best is not None:
                 times[name] = best
-        m = min(times, key=times.get) if times else "png"
+        # PNG's time depends on what is on screen (busy ad frames took 1.3-2.9 s on a Note9 whose
+        # start-up timing said 0.8 s); raw's is steady. So raw unless PNG is clearly faster.
+        m = ("png" if "raw" not in times or ("png" in times and times["png"] < 0.6 * times["raw"]) else "raw") if times else "png"
         _SCREEN["method"] = m
         msg = "screenshots: " + ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in times.items()) + f" -> using {m}"
         dlog(msg)
@@ -335,11 +349,16 @@ def _adb_screenshot():
             print(time.strftime("%H:%M:%S"), msg, flush=True)
     _SCREEN["method"] = m
     img = _grab_raw() if m == "raw" else _grab_png()
-    if img is None and m == "raw":                    # this phone's raw format isn't understood
+    if img is None and m == "raw":                    # unreadable: this shot as PNG
         img = _grab_png()
-        if img is not None:
-            _SCREEN["method"] = "png"
-            dlog("screen: raw screencap unreadable -> png from now on")
+        _SCREEN["raw_fails"] += 1
+        if img is not None and _SCREEN["raw_fails"] >= RAW_FAILS_BEFORE_PNG:
+            _SCREEN["method"] = "png"                 # this phone's raw format isn't understood
+            dlog(f"screen: raw screencap unreadable {RAW_FAILS_BEFORE_PNG} times running -> png from now on")
+        else:
+            dlog("screen: raw screencap unreadable this once -> png for this shot")
+    elif m == "raw":
+        _SCREEN["raw_fails"] = 0
     return img
 
 
@@ -362,6 +381,14 @@ def open_feed(device, log=print):
 def screenshot():
     global FEED
     t0 = time.time()
+    if CAPTURE_HOOK is not None:
+        try:
+            f = CAPTURE_HOOK()
+            if f is not None and f.size:
+                dlog(f"screen: capture hook {f.shape[1]}x{f.shape[0]} in {(time.time() - t0) * 1000:.0f} ms")
+                return f
+        except Exception as e:
+            dlog(f"screen: capture hook failed ({e}) -> adb")
     if FEED is not None:
         f = FEED.get(newer_than=LAST_ACTION + 0.05)
         if f is not None:
@@ -499,6 +526,14 @@ _FAST = {"obj": None, "failed": False}
 
 def input_cmd(args):
     """Send `input <args>` to the phone - through the fast shell when possible."""
+    if INPUT_HOOK is not None:
+        try:
+            t0 = time.time()
+            if INPUT_HOOK(args):
+                dlog(f"input {args} ({(time.time() - t0) * 1000:.0f} ms, hook)")
+                return
+        except Exception as e:
+            dlog(f"input hook failed ({e}) -> adb")
     if FAST_INPUT and not _FAST["failed"]:
         try:
             if _FAST["obj"] is None:
@@ -1109,6 +1144,50 @@ def _match_where(small, integ, t, ok):
     return 0.0, None
 
 
+# A thin white X drawn straight onto an ad's picture (app-install end cards), with no button
+# behind it: a saved picture can't match it because the picture behind changes from ad to ad.
+# Its strokes are pure white (255) while even a "white" background is a little off-white, so
+# only the pure-white pixels are kept and an X shape is looked for among them, in the top corners.
+THIN_X_MIN = 0.75                        # real X's scored 0.80-0.95, anything else 0.60 or less
+THIN_X_SIZES = (0.026, 0.032, 0.038, 0.046)   # X sizes, as fractions of the screen's width
+
+
+def _x_shape(size):
+    key = ("thin-x", size)
+    if key not in _cache:
+        t = np.zeros((size, size), np.uint8)
+        m, thick = max(2, size // 10), max(2, size // 14)
+        cv2.line(t, (m, m), (size - 1 - m, size - 1 - m), 255, thick, cv2.LINE_AA)
+        cv2.line(t, (size - 1 - m, m), (m, size - 1 - m), 255, thick, cv2.LINE_AA)
+        _cache[key] = t
+    return _cache[key]
+
+
+def thin_x(gray, blocked=()):
+    """A thin pure-white X in the top corners of the screen -> (score, x, y, name) or None."""
+    if gray is None:
+        return None
+    H, W = gray.shape[:2]
+    white = np.where(gray >= 252, 255, 0).astype(np.uint8)
+    top = white[:int(H * EDGE_TOP)]
+    best = None
+    for frac in THIN_X_SIZES:
+        t = _x_shape(max(12, int(min(W, H) * frac)))
+        for x0, x1 in ((0, int(W * 0.30)), (int(W * 0.70), W)):
+            crop = top[:, x0:x1]
+            if crop.shape[0] < t.shape[0] or crop.shape[1] < t.shape[1] or not crop.any():
+                continue
+            res = cv2.matchTemplate(crop, t, cv2.TM_CCOEFF_NORMED)
+            cv2.patchNaNs(res, 0.0)
+            _, score, _, loc = cv2.minMaxLoc(res)
+            x, y = x0 + loc[0] + t.shape[1] // 2, loc[1] + t.shape[0] // 2
+            if (best is None or score > best[0]) and ("thin X", spot_of(x, y, W, H)) not in blocked:
+                best = (float(score), x, y, "thin X")
+    dlog(f"find thin X: " + (f"best {best[0]:.2f} at {best[1]},{best[2]}" if best else "none")
+         + f" (need {THIN_X_MIN:.2f})")
+    return best if best and best[0] >= THIN_X_MIN else None
+
+
 def find_button(gray, paths, thr, what="", blocked=(), near=NEAR_MISS, scales=EXTRA_SCALES, second_look=True):
     """An ad button (close, skip, store badge) on screen -> (hit, near_misses).
     hit = (score, x, y, path) or None; near_misses = [(score, x, y, path)] that scored at least
@@ -1366,8 +1445,12 @@ CLOSE_RE = re.compile(
     r"(^|[^a-z])(close|skip|dismiss|no thanks|reward granted)([^a-z]|$)|^\s*[x×✕✖]\s*$", re.I
 )
 BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
-LOSE_REWARD_RE = re.compile(r"lose (your |the )?reward|close (the )?(ad|video)\s*\?", re.I)
-RESUME_RE = re.compile(r"^(resume|resume video|continue watching|keep watching|back to (the )?(ad|video))$", re.I)
+# Google's "Close Ad? You will lose your reward" and others' versions, e.g. Mintegral's "Confirm to
+# close? You will not be rewarded after closing the window - Close it / Continue".
+LOSE_REWARD_RE = re.compile(r"lose (your |the )?reward|close (the )?(ad|video)\s*\?|(not|n't) be rewarded|"
+                            r"won'?t (get|receive) (the |your )?reward|confirm to close", re.I)
+RESUME_RE = re.compile(r"^(resume|resume video|continue|continue watching|keep watching|back to (the )?(ad|video))$", re.I)
+REWARD_LEFT_RE = re.compile(r"(\d+)\s*s(?:ec(?:ond)?s?)?\s+(?:left|remaining|more)", re.I)   # "71s left to be rewarded"
 
 
 STORE_PACKAGES = ("com.android.vending", "com.sec.android.app.samsungapps")
@@ -1385,9 +1468,40 @@ def ui_nodes():
         dlog(f"ui tree: no dump ({(time.time() - t0) * 1000:.0f} ms) - screen probably animating")
         return None
     try:
-        return list(ET.fromstring(xml[start:]).iter("node"))
+        nodes = list(ET.fromstring(xml[start:]).iter("node"))
     except ET.ParseError:
         return None
+    return _ui_to_screen(nodes)
+
+
+def _ui_to_screen(nodes):
+    """Put the tree's positions in screenshot (and tap) coordinates. After the phone's resolution
+    is changed (Samsung offers 720p/1080p/1440p), the tree can still be in the old size - seen:
+    a 2220x1080 tree on a 2960x1440 screen - and a tap at its "Close" landed a quarter short."""
+    boxes = [tuple(map(int, m.groups())) for m in (BOUNDS_RE.match(n.get("bounds", "")) for n in nodes) if m]
+    if not boxes:
+        return nodes
+    tw, th = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    if LAST_FRAME is None or time.time() - _FRAME_T[0] > 5:   # no screenshot just taken to compare with
+        return nodes
+    sh, sw = LAST_FRAME.shape[:2]
+    if not (tw and th and sw and sh):
+        return nodes
+    if (tw > th) != (sw > sh):                             # `wm size` is always portrait; the tree follows the screen
+        sw, sh = sh, sw
+    kx, ky = sw / tw, sh / th
+    if abs(kx - 1) < 0.03 and abs(ky - 1) < 0.03:
+        return nodes
+    if abs(kx - ky) > 0.03 * max(kx, ky):                  # not a plain resize (a split screen, say): leave it
+        dlog(f"ui tree: {tw}x{th} doesn't match the {sw}x{sh} screen by one factor - positions left as they are")
+        return nodes
+    dlog(f"ui tree: drawn at {tw}x{th}, screen is {sw}x{sh} - scaling its positions by {kx:.3f}")
+    for n in nodes:
+        m = BOUNDS_RE.match(n.get("bounds", ""))
+        if m:
+            x1, y1, x2, y2 = map(int, m.groups())
+            n.set("bounds", f"[{round(x1 * kx)},{round(y1 * ky)}][{round(x2 * kx)},{round(y2 * ky)}]")
+    return nodes
 
 
 def store_sheet_open(nodes=None):
@@ -1421,8 +1535,10 @@ def ui_close_button(skip=()):
             m = BOUNDS_RE.match(n.get("bounds", ""))
             if m and RESUME_RE.match(t):
                 x1, y1, x2, y2 = map(int, m.groups())
-                dlog(f"ui tree: 'lose your reward' box - '{t}' at {(x1 + x2) // 2},{(y1 + y2) // 2}")
-                return ((x1 + x2) // 2, (y1 + y2) // 2, t, "resume")
+                left = REWARD_LEFT_RE.search(words)
+                dlog(f"ui tree: 'lose your reward' box - '{t}' at {(x1 + x2) // 2},{(y1 + y2) // 2}"
+                     + (f", {left.group(1)}s still to watch" if left else ""))
+                return ((x1 + x2) // 2, (y1 + y2) // 2, t, "resume", int(left.group(1)) if left else None)
         dlog("ui tree: 'lose your reward' box without a Resume button - not tapping its Close")
         return None
     for n in nodes:
@@ -1446,6 +1562,48 @@ def ui_close_button(skip=()):
         return (cx, (y1 + y2) // 2, label.strip())
     dlog(f"ui tree: nothing labelled close/skip ({(time.time() - t0) * 1000:.0f} ms)")
     return None
+
+
+TOUCH_LOCK_WINDOWS = ("GameBooster Lock Screen",)   # Samsung Game Booster's "screen touch lock" overlay
+
+
+def touch_lock_on():
+    """True when a touch lock is covering the screen: it dims it and swallows every tap (Samsung's
+    Game Booster shows "Drag Lock icon to unlock"). Seen switched on in the middle of a run."""
+    out = quick_shell("dumpsys window windows | grep -E 'Window #'") or ""
+    return any(name in out for name in TOUCH_LOCK_WINDOWS)
+
+
+def unlock_touch_lock(log):
+    """Drag the lock icon out of its box, slowly - the way it is unlocked by hand (a quick drag
+    doesn't count). Returns True if the lock is gone."""
+    log("  Samsung's touch lock (Game Booster) is on and blocks every tap - unlocking it by dragging the lock")
+    frame = screenshot()
+    H, W = frame.shape[:2]
+    x, y = W // 2, H // 2
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    blue = (hsv[..., 0] > 95) & (hsv[..., 0] < 125) & (hsv[..., 1] > 150) & (hsv[..., 2] > 200)
+    blue[:, : int(W * 0.3)] = False
+    blue[:, int(W * 0.7):] = False
+    blue[: int(H * 0.25)] = False
+    blue[int(H * 0.75):] = False
+    ys, xs = np.nonzero(blue)
+    if xs.size > 50:                                   # the blue lock icon itself
+        x, y = int(xs.mean()), int(ys.mean())
+    swipe(x, y, x, y + int(H * 0.3), 1200)
+    nap(1.5, 0)
+    if touch_lock_on():
+        log("  the touch lock is still on - unlock it by hand (drag the lock icon)")
+        return False
+    log("  touch lock off")
+    return True
+
+
+def check_touch_lock(cfg, log):
+    """Unlock a touch lock if one is on (turn off with "unlock_touch_lock": false)."""
+    if cfg.get("unlock_touch_lock", True) and touch_lock_on():
+        return unlock_touch_lock(log)
+    return False
 
 
 def restart_game(pkg, log, wait=15):
@@ -1856,6 +2014,8 @@ def watch_ad(cfg, base, log, home=None):
     max_s = cfg.get("ad_max_seconds", 90)
     hard_max = cfg.get("ad_hard_max_seconds", 240)     # whatever the progress bar says
     bar_close = cfg.get("bar_close_fraction", 0.75)    # active mode: no close taps while a moving bar is below this
+    if passive and cfg.get("reward_ads"):              # watch mode in a game with reward ads: almost to the end
+        bar_close = max(bar_close, cfg.get("reward_bar_close_fraction", 0.95))
     bar_stall = cfg.get("bar_stall_seconds", 15)       # ...nor for this long after it stops short of that (buffering)
     still_need = cfg.get("still_before_close", 3) or 3  # seconds without video motion that mean "it has ended"
     done_min = None if passive else cfg.get("finished_min_seconds")   # earliest close once the ad is seen to have ended
@@ -1882,13 +2042,18 @@ def watch_ad(cfg, base, log, home=None):
     # name order whenever one is on screen, before any close button is considered.
     answers = with_common(cfg.get("answer_templates", []), base, "answer_*.png")
     answer_taps, max_answers = 0, cfg.get("max_answer_taps", 12)
+    answer_used = {}                  # answer picture -> taps on this ad
     wake = cfg.get("wake_tap")            # [x, y] fractions; a tap that makes a faded badge reappear
     wake_taps, last_wake, wake_blocked = 0, 0.0, False
     wake_worked = False                   # a wake press has brought the badge up on this ad
     blind_wakes = cfg.get("wake_tries_without_badge", 3)
     tap_shot = None                       # (screen, x, y) of the last tap, saved if it opens the store
+    last_lock_check = 0.0                 # when we last looked for a touch lock covering the screen
+    last_keepalive = time.time()          # when we last sent a harmless key to count as activity
     last_near = None                      # (picture, time) of the last near-miss tap
     near_tries = cfg.get("near_miss_tries", 6)
+    tap_counts, guard_blocked = {}, set() # taps per spot on this ad; (picture, spot) pairs set aside
+    guard_until = 0.0                     # ...until then (an X that doesn't respond yet may later)
     ad_kind = None                        # the ad's screen name (AdActivity, AppLovinFullscreenActivity...)
     teach_on = bool(cfg.get("_teach"))
     next_teach = cfg.get("teach_after", 45)
@@ -1974,25 +2139,32 @@ def watch_ad(cfg, base, log, home=None):
         badge_now = False
         last_act = ("returned", "", time.time(), None)
 
-    def keep_reward(x, y, how):
-        """The ad warned that closing now loses the reward: RESUME, then leave it alone a while."""
+    def keep_reward(x, y, how, left=None):
+        """The ad warned that closing now loses the reward: RESUME, then leave it alone a while
+        (as long as the ad says is left to watch, if it says)."""
         nonlocal reward_hold, hold_until, min_s
-        log(f"  'Close ad? You will lose your reward' - tapping {how} and waiting {reward_wait}s before "
+        wait = max(reward_wait, left + 3) if left else reward_wait
+        log(f"  the ad says closing now loses the reward - tapping {how} and waiting {wait}s before "
             "trying to close it again")
         tap(x, y, jitter=2)
         acted("resume")
-        reward_hold = time.time() + reward_wait
+        tap_counts.clear()                            # the X is the way out again once the reward is earned
+        blocked_spots.difference_update(guard_blocked)
+        guard_blocked.clear()
+        reward_hold = time.time() + wait
         hold_until = max(hold_until, reward_hold)
         near_seen.clear()
         key_name = "passive_min_seconds" if passive else "ad_min_seconds"
-        if cfg.get(key_name, 5 if passive else 15) < reward_wait:
-            cfg[key_name] = reward_wait               # this game's ads are reward ads: close them later
+        if cfg.get(key_name, 5 if passive else 15) < reward_wait or not cfg.get("reward_ads"):
+            cfg[key_name] = max(cfg.get(key_name, 5 if passive else 15), reward_wait)  # reward ads: close them later
+            cfg["reward_ads"] = True                  # ...and not while their video is still running
             path = cfg.get("_profile_path")
             if path:
                 try:
                     with open(path) as f:
                         raw = json.load(f)
-                    raw[key_name] = reward_wait
+                    raw[key_name] = cfg[key_name]
+                    raw["reward_ads"] = True
                     save_profile(path, raw)
                     log(f"  this game shows reward ads: from now on its ads aren't closed before {reward_wait}s "
                         f"({key_name} in its profile)")
@@ -2000,12 +2172,42 @@ def watch_ad(cfg, base, log, home=None):
                     pass
         nap(2)
 
+    def settle_badge(hit, what="settled"):
+        """Keep looking (any badge picture) until the same badge sits in the same place twice, and
+        return that; the last one seen if it fades first. A badge that is still opening out (the round
+        play-and-bar icon turning into "Google Play") doesn't respond."""
+        for _ in range(4):
+            nap(cfg.get("badge_settle_seconds", 0.5), 0)
+            settled, _ = find_button(gray_screen(), stuck, stuck_thr, f"store-badge ({what})", decoy_spots())
+            if not settled:
+                break
+            same = settled[3] == hit[3] and abs(settled[1] - hit[1]) < 12 and abs(settled[2] - hit[2]) < 12
+            hit = settled
+            if same:
+                break
+        return hit
+
     def tap_button(hit, kind, gray, note=""):
-        nonlocal closed_once
+        nonlocal closed_once, guard_until
         H, W = (gray.shape[:2] if gray is not None else screen_size()[::-1])
+        # The same place tapped again and again with the ad still there (an "are you sure?" box over it,
+        # say): set it aside and let the other ways out have a go. Counted per place, whichever saved
+        # picture matched there (two pictures of the same X count together).
+        spot = spot_of(hit[1], hit[2], W, H)
+        if tap_counts.get(spot, 0) >= cfg.get("same_tap_limit", 3):
+            first = spot not in {sp for _, sp in guard_blocked}
+            for p in list(close) + list(skips) + [hit[3]]:     # (+ this find's own name: the thin-X finder has one)
+                k = (os.path.basename(p), spot)
+                guard_blocked.add(k)
+                blocked_spots.add(k)
+            if first:
+                log(f"  tapped there {tap_counts[spot]} times and the ad is still showing - trying other ways out")
+                guard_until = time.time() + cfg.get("same_tap_pause", 20)
+            return
         log(f"  close button {os.path.basename(hit[3])} ({hit[0]:.2f}){note}")
         tap(hit[1], hit[2], jitter=2)
-        acted(kind, hit[3], spot_of(hit[1], hit[2], W, H), shot=(gray, hit[1], hit[2]))
+        acted(kind, hit[3], spot, shot=(gray, hit[1], hit[2]))
+        tap_counts[spot] = tap_counts.get(spot, 0) + 1
         closed_once = True
         near_seen.clear()
         nap(2)
@@ -2027,6 +2229,29 @@ def watch_ad(cfg, base, log, home=None):
             log(f"  the ad has run for {elapsed:.0f}s - giving up on it")
             snapshot("hard-timeout", log)
             return finish(False, "timeout")
+
+        # A close button set aside after taps that didn't work gets another go later: some only start
+        # responding a while after they appear.
+        if guard_blocked and time.time() >= guard_until:
+            blocked_spots.difference_update(guard_blocked)
+            for _, sp in guard_blocked:
+                tap_counts.pop(sp, None)
+            guard_blocked.clear()
+            dlog("ad: trying the set-aside close button again")
+
+        # Samsung's touch lock seems to come on after about 3 minutes without a touch, which a long ad
+        # gives it: a harmless key every minute (WAKEUP does nothing while the screen is on) may keep it off.
+        keep_every = cfg.get("keep_touch_alive_seconds", 60)
+        if keep_every and time.time() - max(LAST_ACTION, last_keepalive) >= keep_every:
+            last_keepalive = time.time()
+            dlog("ad: harmless key to count as activity (keeps a touch lock from coming on)")
+            input_cmd("keyevent KEYCODE_WAKEUP")
+
+        # A touch lock that came on by itself swallows every tap: take it off first.
+        if time.time() - last_lock_check >= cfg.get("touch_lock_check_seconds", 10):
+            last_lock_check = time.time()
+            if check_touch_lock(cfg, log):
+                continue
 
         # An ad click-through opened the store / a browser: go back to the game.
         fg, act = focus()
@@ -2139,7 +2364,8 @@ def watch_ad(cfg, base, log, home=None):
             said_ended = True
         risky_ok = not playing and now >= hold_until
         # A rewarded video that is visibly still running: leave its close-looking pictures alone.
-        too_early = not passive and ((bar_running and (bar_at or 0) < bar_close) or ticking or (
+        # (watch mode too, for a game known to show reward ads: closing one early loses the reward)
+        too_early = (not passive or cfg.get("reward_ads")) and ((bar_running and (bar_at or 0) < bar_close) or ticking or (
             bar_seen_moving and (bar_at or 0) < bar_close and now - last_moving < bar_stall))
         wait_s = min_s
         if done_min is not None and ended:
@@ -2193,9 +2419,16 @@ def watch_ad(cfg, base, log, home=None):
 
         if answers and answer_taps < max_answers and not passive:
             ranked = [r for r in score_all(gray, answers) if r[0] >= close_thr] if gray is not None else []
+            # The same answer twice is enough: a third time it is leading round in a circle (a survey
+            # whose X opens a "leave?" box, where the answer button goes back in).
+            ranked = [r for r in ranked if answer_used.get(os.path.basename(r[3]), 0) < 2]
             hit = min(ranked, key=lambda r: os.path.basename(r[3])) if ranked else None
             if hit:
-                log(f"  the ad wants an answer - tapping {os.path.basename(hit[3])} ({hit[0]:.2f})")
+                name = os.path.basename(hit[3])
+                if not answer_used:
+                    snapshot(f"answer-{name}", dlog)   # the screen it was on, for teaching a better way out
+                answer_used[name] = answer_used.get(name, 0) + 1
+                log(f"  the ad wants an answer - tapping {name} ({hit[0]:.2f})")
                 tap(hit[1], hit[2], jitter=2)
                 acted("answer", hit[3])
                 answer_taps += 1
@@ -2239,14 +2472,14 @@ def watch_ad(cfg, base, log, home=None):
             if use_ui and time.time() - last_ui >= ui_every:
                 last_ui = time.time()
                 ui = ui_close_button(skip=blocked_ui | {k for k, n in DECOYS["ui"].items() if n >= 2})
-                if ui:
+                if ui and not (len(ui) > 3 and ui[3] in ("resume", "store")):   # those can come up again and again
                     k = (ui[2], ui[0] // 30, ui[1] // 30)
                     ui_tried[k] = ui_tried.get(k, 0) + 1
                     if ui_tried[k] > 2:                 # tapped twice already and still here: it isn't the way out
                         dlog(f"ad: skipping UI-tree button {ui[2][:40]!r} - tapping it twice didn't help")
                         ui = None
             if ui and len(ui) > 3 and ui[3] == "resume":
-                keep_reward(ui[0], ui[1], repr(ui[2]))
+                keep_reward(ui[0], ui[1], repr(ui[2]), ui[4] if len(ui) > 4 else None)
                 continue
             if ui and len(ui) > 3 and ui[3] == "store":
                 log("  a Play Store sheet is open over the ad - pressing BACK to return")
@@ -2260,6 +2493,10 @@ def watch_ad(cfg, base, log, home=None):
                 acted("ui", ui[2], shot=(gray, ui[0], ui[1]))
                 closed_once = True
                 nap(2)
+                continue
+            hit = thin_x(gray, decoy_spots()) if cfg.get("thin_x", True) and not ui else None
+            if hit:
+                tap_button(hit, "close", gray, " drawn on the ad")
                 continue
             if closed_once and not back_in_game and not passive:
                 log(f"  ad dismissed after {elapsed:.0f}s")
@@ -2318,6 +2555,10 @@ def watch_ad(cfg, base, log, home=None):
                     hit, _ = find_button(gray_screen(), stuck, stuck_thr, "store-badge (after wake)", decoy_spots())
                     if not hit:
                         nap(0.05, 0)
+                if hit:
+                    # Caught while still coming in, the badge doesn't respond yet: the round play-and-bar
+                    # icon shows first and then opens out into the "Google Play" pill.
+                    hit = settle_badge(hit)
                 if hit and not wake_worked:
                     wake_record(ad_kind, "badge")
                 wake_worked = wake_worked or bool(hit)
@@ -2339,20 +2580,30 @@ def watch_ad(cfg, base, log, home=None):
                 last_stuck = time.time()
                 last_badge = time.time()
                 badge_now = False
-                if left_game_within(pkg, 5):
+                if left_game_within(pkg, 1.2):
                     continue                                   # the store opened: handled at the top
-                if use_ui and store_sheet_open():
-                    # The store opened as a sheet over the ad (Android still says the ad is in front).
-                    log("  the store opened over the ad - pressing BACK to return")
-                    return_from_sheet()
-                    continue
-                again, _ = find_button(gray_screen(), [hit[3]], stuck_thr, "store-badge (still there?)", decoy_spots())
+                # A collapsed badge (the round play-and-bar one) only opens up into "Google Play" on the
+                # first touch, and shrinks back after a few seconds: look right away for a badge - this
+                # one or its opened-up form - and tap it while it's showing. A badge still in view also
+                # means no store sheet has covered the ad.
+                again, _ = find_button(gray_screen(), stuck, stuck_thr, "store-badge (still there?)", decoy_spots())
+                if again:
+                    again = settle_badge(again, "still opening?")   # it may be opening out into the pill
                 fg2, _a = focus()
+                if not (again and fg2 == pkg):
+                    if left_game_within(pkg, 4):
+                        continue
+                    if use_ui and store_sheet_open():
+                        # The store opened as a sheet over the ad (Android still says the ad is in front).
+                        log("  the store opened over the ad - pressing BACK to return")
+                        return_from_sheet()
+                    continue
                 if again and fg2 == pkg:
                     # Some badges ignore a held press but react to a plain quick tap (the way a finger taps).
-                    log("  the press didn't open the store - tapping it again, dead centre and quick")
+                    log("  the press didn't open the store - tapping " + ("it again" if again[3] == hit[3] else
+                        f"{os.path.basename(again[3])}, which it opened up into") + ", dead centre and quick")
                     tap(again[1], again[2], jitter=0)
-                    acted("badge", hit[3])
+                    acted("badge", again[3])
                     last_badge = time.time()
                     if left_game_within(pkg, 5):
                         continue                               # the store opened: handled at the top
@@ -2390,6 +2641,11 @@ def watch_ad(cfg, base, log, home=None):
         badge_pending = stuck and badge_seen and stuck_taps == 0
         fast = ended and now - last_try >= no_exit_s and not badge_pending
         if risky_ok and (quiet >= max_s or fast):
+            if check_touch_lock(cfg, log):                 # nothing worked because taps were being swallowed
+                last_lock_check = time.time()
+                back_presses = 0
+                last_act = ("returned", "", time.time(), None)
+                continue
             if back_presses >= (2 if fast and quiet < max_s else 3):
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)
@@ -2892,6 +3148,8 @@ def cmd_watch(args):
         + (" (also scanning the game screen for ad close buttons)" if args.scan else ""))
 
     misc_every = cfg.get("misc_check_seconds", 5)
+    last_lock_look = 0.0
+    last_keepalive = time.time()
     last_misc = 0.0
     if cfg.get("misc_buttons"):
         log(f"also dealing with the game's own pop-ups ({len(misc_buttons(cfg, base))} saved), every {misc_every}s")
@@ -2938,9 +3196,21 @@ def cmd_watch(args):
                 log("game is back - watching")
                 away = False
 
+            # The game (or an ad over it) is in front but nothing has touched the phone for a while -
+            # autospin, or an ad that was given up on: a harmless key now and then keeps the phone from
+            # dozing off and Samsung's touch lock from coming on. Never while another app is in front.
+            keep_every = cfg.get("keep_touch_alive_seconds", 60)
+            if keep_every and time.time() - max(LAST_ACTION, last_keepalive) >= keep_every:
+                last_keepalive = time.time()
+                dlog("watch: harmless key to count as activity (keeps the phone awake)")
+                input_cmd("keyevent KEYCODE_WAKEUP")
+
             if a in home:                      # the game's own screen
                 armed = True
                 frame = None
+                if time.time() - last_lock_look >= 60:
+                    last_lock_look = time.time()
+                    check_touch_lock(cfg, log)
                 if cfg.get("misc_buttons") and time.time() - last_misc >= misc_every:
                     last_misc = time.time()
                     frame = gray_screen()
