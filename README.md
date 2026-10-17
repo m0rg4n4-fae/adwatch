@@ -137,7 +137,8 @@ Then open a pull request with the new files. They are small crops of ad close bu
 | A pop-up over the ad (like an "Install" bubble) blocks it | **Teach it buttons → Ad pop-up to tap away**, boxing the whole pop-up. Whenever it shows up, adwatch taps beside it. |
 | The store badge fades out and doesn't come back | Set a wake point in the middle of the ad (run with pausing on and press `w`). Points near the very top or bottom of the screen get swallowed by Android, so adwatch moves them in a little. |
 | Watch mode misses an ad | That ad is drawn inside the game's own screen. Answer yes to "Also check inside the game's own screen?". |
-| Watch mode calls a real game screen an ad | Put the game on that screen and run `adwatch watch GAME --learn`. |
+| Watch mode calls a real game screen an ad | Choose **Game screens** in the menu (or run `adwatch screens GAME`), put the game on that screen and press Enter. Repeat for each of the game's own screens; a watch that's already running picks them up straight away. |
+| The game has several ad buttons, each with a cooldown timer | **Teach it buttons → Ad button** and box only the part that shows when the ad is ready (a "▶ Free" pill, say), not the timer. If the buttons look the same, one picture covers them all; if not, save each one and answer yes to "another one the loop can use instead". Answer yes to "Does the button show a timer" and the loop waits for one to be ready instead of giving up. |
 | The box-drawing window doesn't open | Tkinter is missing. See [Install](#install). |
 
 ## Command line
@@ -152,7 +153,9 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 | `adwatch` | the menu |
 | `adwatch run GAME [-n N] [--teach]` | ad loop. `--teach` pauses on an ad it can't close so you can save its button |
 | `adwatch watch GAME [-n N] [--minutes M] [--scan] [--teach] [--learn]` | close ads that appear by themselves |
+| `adwatch screens GAME [--add] [--remove N]` | teach the game's own screens (lobby, shop, settings...) so watch mode never takes them for ads |
 | `adwatch new NAME` | add a game (have it open on the phone) |
+| `adwatch grab GAME LABEL --then-ad [--alt] [--wait-ready SECONDS]` | save an ad button; `--alt` adds it as another choice for the existing one, `--wait-ready` waits for a ready one (cooldown timers) |
 | `adwatch grab GAME LABEL [flags]` | box a button on a live screenshot |
 | `adwatch step GAME KIND ...` | add `watch_ad`, `wait N`, `key NAME` or `tap_xy X Y` to the loop |
 | `adwatch test GAME` | score every saved picture against the current screen |

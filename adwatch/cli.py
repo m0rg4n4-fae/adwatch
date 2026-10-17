@@ -693,6 +693,11 @@ AD_CLASS_RE = re.compile(
     r"^(Ads?([A-Z]\w*)?Activity|\w*(Interstitial|RewardedVideo|RewardVideo|FullscreenAd|FullScreenAd|AudienceNetwork)\w*)$")
 
 
+# Looser than AD_CLASS_RE, for one decision only: whether a screen of the game's OWN package might
+# still be an ad ("RewardedAdActivity", "PromoActivity") - then it isn't waved through as a game screen.
+MAYBE_AD_RE = re.compile(r"(?:^|[a-z0-9])Ads?(?=[A-Z0-9]|$)|Interstitial|Reward|Promo|Offerwall|Sponsor|Video")
+
+
 def foreign_ad(pkg, act):
     """True when an app OTHER than the game is showing an ad on the game's behalf. Meta's ads
     ("Ads served by Meta") run inside the Facebook app: com.facebook.katana /
@@ -2681,7 +2686,11 @@ def run_step(step, cfg, base, log):
             open_paths = expand(cfg.get("open_templates", []), base, quiet=True)
         open_taps, t0 = 0, time.time()
         open_wait = cfg.get("open_wait_seconds", 6)
-        deadline = time.time() + step.get("timeout", 10)
+        # Buttons with a cooldown (a timer shows where "Free" will be): keep looking this long for one
+        # that is ready, instead of counting a few seconds without one as a failure.
+        ready_wait = step.get("wait_until_ready", 0)
+        deadline = time.time() + max(step.get("timeout", 10), ready_wait)
+        said_waiting, last_said = False, 0.0
         best, last = 0.0, None
         while time.time() < deadline:
             # An ad the game showed by itself (when it starts, between screens...): see it out first.
@@ -2704,6 +2713,14 @@ def run_step(step, cfg, base, log):
                 tap(hit[1], hit[2])
                 nap(step.get("after", 1.5))
                 return True
+            if ready_wait and now_best < thr and time.time() - t0 > step.get("timeout", 10):
+                if not said_waiting:
+                    log(f"  no ad button is ready yet - waiting for one (up to {ready_wait / 60:g} min)")
+                    said_waiting, last_said = True, time.time()
+                elif time.time() - last_said >= 300:
+                    log(f"  still waiting for an ad button ({(time.time() - t0) / 60:.0f} min so far)")
+                    last_said = time.time()
+                nap(2, 0.1)                         # no hurry: a cooldown takes minutes
             # A game pop-up (level up, daily reward...) covering the button: deal with it first.
             if now_best < thr and time.time() - t0 > 1.0 and clear_misc(cfg, base, log, last):
                 deadline = max(deadline, time.time() + 6)
@@ -3121,6 +3138,91 @@ def learn_home(cfg, log, force=False):
     return home
 
 
+def short_activity(a):
+    return (a or "?").rsplit(".", 1)[-1]
+
+
+def save_home_screens(cfg, home):
+    """Store the game's normal screens in its profile (and in cfg)."""
+    cfg["home_activities"] = sorted(home)
+    path = cfg.get("_profile_path")
+    if path:
+        with open(path) as f:
+            raw = json.load(f)
+        raw["home_activities"] = sorted(home)
+        save_profile(path, raw)
+
+
+def cmd_screens(args):
+    """Teach the game's own screens (lobby, shop, a settings page...), so watch mode never takes
+    one of them for an ad. Interactive: put the game on a screen, press Enter, repeat."""
+    args.profile = resolve_profile(args.profile)
+    with open(args.profile) as f:
+        cfg = json.load(f)
+    cfg["_profile_path"] = os.path.abspath(args.profile)
+    pkg, extra = cfg["package"], cfg.get("ad_activities", [])
+    home = set(cfg.get("home_activities", []))
+
+    def show():
+        if not home:
+            print("No normal screens saved yet for this game.")
+        for i, a in enumerate(sorted(home), 1):
+            print(f"  {i}. {short_activity(a)}   ({a})")
+
+    def add_current():
+        p, a = focus()
+        if p != pkg:
+            print(f"  the game isn't in front (saw {p or 'nothing'}) - open it on the screen first")
+            return False
+        if is_ad_activity(a, extra):
+            print(f"  that looks like an ad screen ({short_activity(a)}) - not saved")
+            return False
+        if a in home:
+            print(f"  {short_activity(a)} is already saved")
+            return False
+        home.add(a)
+        save_home_screens(cfg, home)
+        print(green(f"  saved {short_activity(a)} as one of the game's normal screens"))
+        return True
+
+    if args.remove:
+        lst = sorted(home)
+        if not 1 <= args.remove <= len(lst):
+            sys.exit(f"there is no screen {args.remove} (see `adwatch screens {os.path.splitext(os.path.basename(args.profile))[0]}`)")
+        home.discard(lst[args.remove - 1])
+        save_home_screens(cfg, home)
+        print(f"removed {short_activity(lst[args.remove - 1])}")
+        return show()
+    if args.add:
+        add_current()
+        return
+    show()
+    if not sys.stdin.isatty():
+        return
+    print("\nPut the game on another of its own screens (no ad showing) and press Enter to save it.")
+    print("Type a number to remove that screen, or q to finish. A running watch picks changes up straight away.")
+    while True:
+        try:
+            cmd = input("> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if cmd in ("q", "quit", "exit"):
+            break
+        if cmd.isdigit():
+            lst = sorted(home)
+            n = int(cmd)
+            if 1 <= n <= len(lst):
+                home.discard(lst[n - 1])
+                save_home_screens(cfg, home)
+                print(f"  removed {short_activity(lst[n - 1])}")
+            else:
+                print("  no screen with that number")
+            continue
+        add_current()
+    show()
+
+
 @keeps_awake("watching for ads")
 def cmd_watch(args):
     """Passive mode: do nothing until an ad takes over the screen, then close it."""
@@ -3150,6 +3252,10 @@ def cmd_watch(args):
     misc_every = cfg.get("misc_check_seconds", 5)
     last_lock_look = 0.0
     last_keepalive = time.time()
+    prof_path = cfg.get("_profile_path")
+    prof_mtime = os.path.getmtime(prof_path) if prof_path and os.path.exists(prof_path) else 0
+    own_is_game = cfg.get("own_screens_are_game", True)
+    own_noted = set()
     last_misc = 0.0
     if cfg.get("misc_buttons"):
         log(f"also dealing with the game's own pop-ups ({len(misc_buttons(cfg, base))} saved), every {misc_every}s")
@@ -3233,8 +3339,37 @@ def cmd_watch(args):
                 nap(idle, 0.1)
                 continue
 
+            # Screens taught while this watch runs (`adwatch screens GAME` in another terminal).
+            try:
+                mt = os.path.getmtime(prof_path) if prof_path else 0
+            except OSError:
+                mt = prof_mtime
+            if mt != prof_mtime:
+                prof_mtime = mt
+                try:
+                    with open(prof_path) as f:
+                        new_home = set(json.load(f).get("home_activities", []))
+                except (OSError, ValueError):
+                    new_home = home
+                if new_home != home:
+                    for added in sorted(new_home - home):
+                        log(f"now also treating {short_activity(added)} as one of the game's normal screens")
+                    home = new_home
+                    if a in home:
+                        continue
+
             # A different screen inside the game: an ad (or something we were told to leave).
             known = is_ad_activity(a, extra)
+            # One of the game's OWN screens (its name starts with the game's package, e.g. a shop or
+            # settings page) that doesn't look like an ad screen: the game, not an ad.
+            if own_is_game and not known and a.startswith(pkg + ".") and not MAYBE_AD_RE.search(short_activity(a)):
+                if a not in own_noted:
+                    own_noted.add(a)
+                    log(f"{short_activity(a)} is one of the game's own screens, not an ad - leaving it alone "
+                        f"(save it with: adwatch screens {os.path.splitext(os.path.basename(prof_path or 'GAME'))[0]})")
+                armed = True
+                nap(idle, 0.1)
+                continue
             if not armed or not (known or unknown_is_ad):
                 if noted != a and armed:
                     log(f"unfamiliar screen ({a}) - leaving it alone")
@@ -3532,8 +3667,29 @@ def cmd_grab(args):
     if args.stuck:
         print("saved to the shared pool: works in every game. It is only tapped when an ad shows "
               "no close button after stuck_seconds; BACK is then pressed until the game returns.")
+    wait_ready = getattr(args, "wait_ready", None)
+    if (args.step or args.then_ad) and getattr(args, "alt", False):
+        # Another choice for the existing ad button: the loop taps whichever of them is ready.
+        steps = cfg["steps"]
+        i = next((k for k, st in enumerate(steps) if "tap" in st and k + 1 < len(steps)
+                  and steps[k + 1].get("watch_ad")), None)
+        if i is None:
+            print("no ad button in the loop yet - adding this one as the ad button")
+        else:
+            taps = [steps[i]["tap"]] if isinstance(steps[i]["tap"], str) else list(steps[i]["tap"])
+            if rel not in taps:
+                taps.append(rel)
+            steps[i]["tap"] = taps
+            if wait_ready:
+                steps[i]["wait_until_ready"] = wait_ready
+            save_profile(p, cfg)
+            print(f"added as another choice for the ad button ({len(taps)} now): the loop taps whichever is ready")
+            return
     if args.step or args.then_ad:
-        cfg["steps"].append({"tap": rel, "timeout": 10, "optional": args.optional})
+        step = {"tap": rel, "timeout": 10, "optional": args.optional}
+        if wait_ready:
+            step["wait_until_ready"] = wait_ready
+        cfg["steps"].append(step)
         if args.then_ad:
             cfg["steps"].append({"watch_ad": True})
         save_profile(p, cfg)
@@ -3687,9 +3843,11 @@ def all_devices():
 
 def describe_step(step):
     if "tap" in step:
-        name = step["tap"] if isinstance(step["tap"], str) else step["tap"][0]
-        name = os.path.splitext(os.path.basename(name))[0]
-        return f"tap '{name}'" + (" (if it's there)" if step.get("optional") else "")
+        taps = [step["tap"]] if isinstance(step["tap"], str) else list(step["tap"])
+        names = " or ".join(f"'{os.path.splitext(os.path.basename(t))[0]}'" for t in taps)
+        return (f"tap {names}" + (" (whichever is ready)" if len(taps) > 1 else "")
+                + (f" (waits up to {step['wait_until_ready'] / 60:g} min for one)" if step.get("wait_until_ready") else "")
+                + (" (if it's there)" if step.get("optional") else ""))
     if step.get("watch_ad"):
         return "watch the ad and close it"
     if "wait" in step:
@@ -3920,6 +4078,7 @@ class Menu:
         items = [
             ("Run the ad loop", "taps the ad button, waits, closes the ad, repeats", self.act_run),
             ("Watch for pop-up ads", "you play; it closes ads that appear by themselves", self.act_watch),
+            ("Game screens", "teach the game's own screens so they're never taken for ads", self.act_screens),
             ("Teach it buttons", "the ad button, ad close buttons, store badges", self.act_buttons),
             ("Test", "check the saved buttons against the phone's screen", self.act_test),
             ("Games", "switch game or add a new one", self.act_games),
@@ -3986,6 +4145,17 @@ class Menu:
                                                    scan=scan, teach=teach, learn=False))
         pause()
 
+    def act_screens(self):
+        ui_title("Game screens")
+        if not self.need(vision=False):
+            return pause()
+        ui_wrap("In watch mode, any screen of the game that isn't one of its normal screens is treated as "
+                "an ad. If the game has more than one screen of its own (a lobby, a shop, a settings page), "
+                "save each of them here. A watch that's already running picks them up straight away.")
+        print()
+        self.guarded(cmd_screens, argparse.Namespace(profile=profile_path(self.game), add=False, remove=None))
+        pause()
+
     def grab(self, kind):
         g = GRABS[kind]
         ui_title(g["title"])
@@ -4001,7 +4171,7 @@ class Menu:
         ui_wrap(g["show"])
         print()
         flags = dict(step=False, then_ad=False, optional=False, close=False, ingame=False, open=False, stuck=False, popup=False,
-                     skip=False, misc=False, action="tap")
+                     skip=False, misc=False, action="tap", alt=False, wait_ready=None)
         flags.update(g["flags"])
         label = g["label"]
         if kind == "misc":
@@ -4021,9 +4191,19 @@ class Menu:
             flags["optional"] = ask_yes("Is this button sometimes missing? (then it's skipped)", True)
         if kind in ("ad", "after"):
             rel = f"../templates/{self.game}/{label}.png"
-            if any(s.get("tap") == rel for s in self.cfg().get("steps", [])):
+            steps = self.cfg().get("steps", [])
+            if any(s.get("tap") == rel or (isinstance(s.get("tap"), list) and rel in s["tap"]) for s in steps):
                 print(dim(f"   '{label}' is already in the loop: only its picture will be replaced."))
                 flags["step"] = flags["then_ad"] = False
+            elif kind == "ad":
+                has_ad = any("tap" in st and k + 1 < len(steps) and steps[k + 1].get("watch_ad")
+                             for k, st in enumerate(steps))
+                if has_ad:
+                    flags["alt"] = ask_yes("The game already has an ad button. Is this another one the loop can use "
+                                           "instead (it taps whichever is ready)?", True)
+                if ask_yes("Does the button show a timer instead while its ad isn't ready? (then save just the part "
+                           "that only shows when it's ready, like 'Free', and the loop waits for one)", False):
+                    flags["wait_ready"] = int(ask_num("Longest wait for a ready button, in minutes", 15, 1, 240) * 60)
         delay = ask_num("Seconds before the screenshot (time to get the phone ready)", g["delay"], 0, 120)
         ui_wrap("\nA window with the phone's screen will open. Drag a box tightly around the button, "
                 "then press Enter (Esc cancels).")
@@ -4315,6 +4495,10 @@ def main():
     w.add_argument("--teach", action="store_true",
                    help="pause when an ad has no known button so you can save one, then continue")
     w.add_argument("--learn", action="store_true", help="add the current screen as one of the game's normal screens")
+    sc = sub.add_parser("screens", help="teach the game's own screens so watch mode never takes them for ads")
+    sc.add_argument("profile", metavar="GAME")
+    sc.add_argument("--add", action="store_true", help="save the screen the game is on now, without asking")
+    sc.add_argument("--remove", type=int, metavar="N", help="remove saved screen number N")
     t = sub.add_parser("test"); t.add_argument("profile", metavar="GAME")
     s = sub.add_parser("snap"); s.add_argument("out", nargs="?")
     c = sub.add_parser("crop")
@@ -4328,6 +4512,10 @@ def main():
     g.add_argument("name"); g.add_argument("label")
     g.add_argument("--step", action="store_true", help="also append a 'tap this' step")
     g.add_argument("--then-ad", action="store_true", help="tap step followed by watch_ad")
+    g.add_argument("--alt", action="store_true",
+                   help="with --then-ad: another choice for the existing ad button (whichever is ready gets tapped)")
+    g.add_argument("--wait-ready", type=int, metavar="SECONDS", dest="wait_ready",
+                   help="with --then-ad/--alt: the button has a cooldown timer; wait this long for one to be ready")
     g.add_argument("--optional", action="store_true", help="step may be absent")
     g.add_argument("--close", action="store_true", help="save as an ad close button (shared by all games)")
     g.add_argument("--ingame", action="store_true", help="save as an 'in the game' marker")
@@ -4382,7 +4570,8 @@ def main():
         open_feed(args.feed)
     try:
         {"run": cmd_run, "watch": cmd_watch, "test": cmd_test, "snap": cmd_snap, "crop": cmd_crop,
-         "new": cmd_new, "grab": cmd_grab, "step": cmd_step, "stamp": cmd_stamp}[args.cmd](args)
+         "new": cmd_new, "grab": cmd_grab, "step": cmd_step, "stamp": cmd_stamp,
+         "screens": cmd_screens}[args.cmd](args)
     except KeyboardInterrupt:
         print("\nstopped")
     except Exception:                                  # keep the full error in the log for later

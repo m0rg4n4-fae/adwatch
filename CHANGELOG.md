@@ -4,6 +4,15 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Ad buttons with cooldown timers (Oct 16)
+- **The ad loop can wait for an ad button to be ready.** For games whose ad buttons stay on screen and show a timer while they cool down: save just the part that only shows when the ad is ready (like a "▶ Free" pill), and set `wait_until_ready` on the step (the menu asks "Does the button show a timer..."). The loop then keeps looking for a ready button for that long, saying so once (and every 5 minutes), instead of counting a few seconds without one as a failure and restarting the game.
+- **Several ad buttons, whichever is ready.** Saving another ad button now asks whether it's another choice for the same step (`grab --then-ad --alt` on the command line). The step then taps whichever of its buttons is ready, instead of adding a second step that would need both in turn. Buttons that look the same need only one picture: it matches all of them.
+
+### Teaching a game's own screens (Oct 15)
+- **`adwatch screens GAME`** (and **Game screens** in the menu) teaches watch mode as many of the game's own screens as you like: put the game on a screen, press Enter, repeat. It also lists them and removes them by number; `--add` saves the current screen without asking. Before, it was one screen at a time with `watch --learn`, and watch mode had to be stopped first.
+- **A running watch picks up newly taught screens straight away** (it notices the profile change), so you can teach a screen from a second terminal without stopping it.
+- **The game's own screens aren't taken for ads in the first place.** A screen whose name belongs to the game itself (e.g. `com.some.game.ShopActivity`) and doesn't look like an ad (nothing like "Ad", "Reward", "Promo", "Video" in its name) is left alone and logged once, with a hint to save it. Ad networks' screens have their own names, so they aren't affected. Turn it off with `"own_screens_are_game": false`.
+
 ### Reward ads in watch mode, badge pressed once it settles (Oct 13)
 - **Other ad networks' "you'll lose your reward" boxes are recognised.** A Mintegral reward ad answers its X with "Confirm to close? You will not be rewarded after closing the window - Close it / Continue"; adwatch didn't know that wording and kept tapping the X behind the box every 4 seconds for 4 minutes. It now taps Continue, and if the ad shows how long is left ("71s left to be rewarded") waits that long before trying the X again.
 - **A place that has been tapped 3 times (by any saved close picture) with the ad still there is set aside** for that ad, so the other ways out (the screen tree, the badge, BACK) get a go. It gets another go after 20 seconds (`same_tap_pause`; some X's only start responding a while after they appear) and after a "lose your reward" box has been answered. Change the number with `same_tap_limit`.
