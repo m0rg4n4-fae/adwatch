@@ -938,7 +938,7 @@ def choose_device():
     elif sys.stdin.isatty():
         print("Several phones connected:")
         for i, d in enumerate(devs, 1):
-            print(f"  {i}) {d['model']}  ({d['serial']})")
+            print(f"  {i}) {d['model']}  ({d['serial']}){in_use_note(d['serial'])}")
         while True:
             pick = input("Which one? ").strip()
             if pick.isdigit() and 1 <= int(pick) <= len(devs):
@@ -946,9 +946,133 @@ def choose_device():
                 break
     else:
         sys.exit("several phones connected - choose one with -s SERIAL:\n  " +
-                 "\n  ".join(f"{d['serial']}  {d['model']}" for d in devs))
+                 "\n  ".join(f"{d['serial']}  {d['model']}{in_use_note(d['serial'])}" for d in devs))
     SERIAL = d["serial"]
     print(f"using {d['model']} ({d['serial']})")
+
+
+# ---------------------------------------------------------------- phone claims
+# A program using a phone holds a lock on <claims folder>/<SERIAL>.json while it runs; the file says
+# who ({"owner", "pid", "since"}). adwatch won't start on, or switch to, a phone another program
+# holds, and holds the phone itself during run and watch. The lock goes away by itself when the
+# program ends, even if it is killed, so a claim can't be left behind. Any program can take part
+# (README, "Several phones at once"). Folder: $PHONE_CLAIMS_DIR, else ~/.local/state/phone-claims.
+_CLAIMS = {}        # serial -> the open file whose lock this process holds
+
+
+def _mine(pid):
+    """True for this process or one of the processes that started it (a launcher that claimed the
+    phone for its bot, keepalive for its adwatch)."""
+    p = os.getpid()
+    for _ in range(30):
+        if pid == p:
+            return True
+        if p <= 1:
+            return False
+        try:
+            with open(f"/proc/{p}/stat") as f:
+                p = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):      # no /proc (macOS): the parent is all we can check
+            return pid == os.getppid()
+    return False
+
+
+def claims_dir():
+    if os.environ.get("PHONE_CLAIMS_DIR"):
+        return os.path.expanduser(os.environ["PHONE_CLAIMS_DIR"])
+    if os.name == "nt":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "phone-claims")
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "phone-claims")
+
+
+def _claim_info(serial):
+    """(held, info): whether a running program holds the phone, and what its claim file says."""
+    try:
+        fh = open(os.path.join(claims_dir(), f"{serial}.json"))
+    except OSError:
+        return False, {}
+    with fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            return False, {}                 # a file left by a program that has ended
+        except OSError:
+            pass
+        try:
+            info = json.load(fh)
+        except ValueError:                   # being written right now
+            info = {}
+    return True, info if isinstance(info, dict) else {}
+
+
+def phone_holder(serial):
+    """What another running program holding this phone says about itself, or None if it's free
+    (or held by this process)."""
+    if fcntl is None or not serial or serial in _CLAIMS:
+        return None
+    held, info = _claim_info(serial)
+    if not held or _mine(info.get("pid")):
+        return None
+    return info or {"owner": "another program"}
+
+
+def describe_holder(info):
+    return " ".join([str(info.get("owner") or "another program")] +
+                    ([f"(pid {info['pid']}, since {info.get('since', '?')})"] if info.get("pid") else []))
+
+
+def claim_phone(serial, owner):
+    """Hold the phone for this process. None when held (or claims can't be used here); the
+    holder's info when another running program has it."""
+    if fcntl is None or not serial or serial in _CLAIMS:
+        return None
+    try:
+        os.makedirs(claims_dir(), exist_ok=True)
+        fh = open(os.path.join(claims_dir(), f"{serial}.json"), "a+")
+    except OSError:
+        return None                          # claims are a courtesy: carry on without
+    for _ in range(10):
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError:
+            held, info = _claim_info(serial)
+            if held and _mine(info.get("pid")):      # a program importing adwatch holds it
+                fh.close()
+                return None
+            if held and info:
+                fh.close()
+                return info
+            time.sleep(0.1)                  # someone only looking at it, or still writing it
+    else:
+        fh.close()
+        return _claim_info(serial)[1] or {"owner": "another program"}
+    fh.seek(0)
+    fh.truncate()
+    json.dump({"owner": owner, "pid": os.getpid(), "since": time.strftime("%Y-%m-%d %H:%M:%S")}, fh)
+    fh.flush()
+    _CLAIMS[serial] = fh
+    return None
+
+
+def release_phone(serial):
+    fh = _CLAIMS.pop(serial, None)
+    if fh is not None:
+        fh.close()
+
+
+def hold_phone(kind, profile, log):
+    """run/watch: hold the phone, or stop if another program is using it."""
+    game = os.path.splitext(os.path.basename(profile))[0]
+    holder = claim_phone(SERIAL, f"adwatch {kind} {game}")
+    if holder:
+        log(f"the phone {SERIAL} is in use by {describe_holder(holder)} - not touching it. "
+            "Stop that first, or choose another phone with -s SERIAL")
+        sys.exit(3)
+
+
+def in_use_note(serial):
+    holder = phone_holder(serial)
+    return f"   in use by {describe_holder(holder)}" if holder else ""
 
 
 def front_app(serial):
@@ -971,7 +1095,8 @@ def use_phone_with_game(pkg, log=print):
         return
     if SERIAL and front_app(SERIAL) == pkg:
         return
-    showing = [d for d in devs if d["serial"] != SERIAL and front_app(d["serial"]) == pkg]
+    showing = [d for d in devs if d["serial"] != SERIAL and not phone_holder(d["serial"])
+               and front_app(d["serial"]) == pkg]
     if len(showing) != 1:
         if SERIAL:
             log(f"note: the game isn't open on the chosen phone ({SERIAL}) - watching it anyway")
@@ -3066,6 +3191,7 @@ def cmd_run(args):
 
     log = make_log()
     use_phone_with_game(cfg["package"], log)
+    hold_phone("run", args.profile, log)
     session_header(cfg, "run")
 
     if foreground() != cfg["package"]:
@@ -3402,6 +3528,7 @@ def cmd_watch(args):
 
     log = make_log()
     use_phone_with_game(cfg["package"], log)
+    hold_phone("watch", args.profile, log)
     session_header(cfg, "watch")
 
     home = learn_home(cfg, log, force=args.learn)
@@ -4129,12 +4256,20 @@ class Menu:
         devs = list_devices()
         want = SERIAL or self.state.get("serial")
         chosen = next((d for d in devs if d["serial"] == want), None)
+        if chosen and not SERIAL and len(devs) > 1 and phone_holder(chosen["serial"]):
+            print(yellow(f"\n The phone used last time ({chosen['serial']}) is in use by "
+                         f"{describe_holder(phone_holder(chosen['serial']))}."))
+            chosen = None
+        free = [d for d in devs if not phone_holder(d["serial"])]
         if not chosen and len(devs) == 1:
             chosen = devs[0]
+        if not chosen and len(devs) > 1 and len(free) == 1:
+            chosen = free[0]
+            print(f" Using {chosen['model'].replace('_', ' ')} ({chosen['serial']}): the only phone not in use.")
         if not chosen and len(devs) > 1 and ask_if_many:
             print("\n More than one phone is connected:")
             try:
-                i = pick([(d["model"].replace("_", " "), d["serial"]) for d in devs], "Which phone")
+                i = pick([(d["model"].replace("_", " "), d["serial"] + in_use_note(d["serial"])) for d in devs], "Which phone")
                 chosen = devs[i]
             except Back:
                 pass
@@ -4516,7 +4651,8 @@ class Menu:
         if not ready:
             ui_wrap(CONNECT_HELP)
             return pause()
-        rows = [(d["model"].replace("_", " "), d["serial"] + ("   current" if self.phone and d["serial"] == self.phone["serial"] else ""))
+        rows = [(d["model"].replace("_", " "), d["serial"] + ("   current" if self.phone and d["serial"] == self.phone["serial"] else "")
+                 + in_use_note(d["serial"]))
                 for d in ready] + [("How to connect a phone", "")]
         i = pick(rows)
         if i == len(ready):

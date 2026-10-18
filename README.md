@@ -178,6 +178,21 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 | `stop` / `restart` | every adwatch that's running, on every phone |
 | `stop-SERIAL` / `restart-SERIAL` | only the adwatch on that phone |
 
+**Phones in use by other programs.** While `run` or `watch` works a phone, adwatch *claims* it, and it won't start on (or switch to) a phone that another program has claimed: it says who has it (`the phone ... is in use by mybot (pid 4242, since ...)`) and stops. The menu marks such phones "in use". If you use only adwatch, there's nothing to do.
+
+Your own scripts can take part in a few lines. A claim is a lock held on `~/.local/state/phone-claims/SERIAL.json` (or `$PHONE_CLAIMS_DIR`) for as long as the program runs, so it goes away by itself when the program ends, even if it crashes:
+
+```python
+import fcntl, json, os, time
+os.makedirs(os.path.expanduser("~/.local/state/phone-claims"), exist_ok=True)
+claim = open(os.path.expanduser(f"~/.local/state/phone-claims/{SERIAL}.json"), "a+")
+fcntl.flock(claim, fcntl.LOCK_EX | fcntl.LOCK_NB)      # raises BlockingIOError if someone holds it
+claim.truncate(0); json.dump({"owner": "mybot", "pid": os.getpid(), "since": time.strftime("%F %T")}, claim); claim.flush()
+# keep `claim` open while you use the phone
+```
+
+A script that imports adwatch can call `adwatch.cli.claim_phone(serial, "mybot")` instead (it returns the holder's details if the phone is taken, or None). Claims work on Linux and macOS; on Windows they're skipped.
+
 </details>
 
 <details>
