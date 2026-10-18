@@ -411,6 +411,21 @@ def screenshot():
     img = cv2.imread(tmp)
     if img is not None:
         return img
+    # The phone may have dropped off adb for a moment (a USB hiccup): if it isn't listed, give it up
+    # to a minute to come back before giving up (once per call).
+    if SERIAL and _wait_for_device[0] > 0 and SERIAL not in [d["serial"] for d in list_devices()]:
+        print(f"the phone ({SERIAL}) dropped off adb - waiting up to a minute for it", flush=True)
+        dlog(f"screen: {SERIAL} not listed -> waiting for it")
+        end = time.time() + 60
+        while time.time() < end and SERIAL not in [d["serial"] for d in list_devices()]:
+            time.sleep(2)
+        if SERIAL in [d["serial"] for d in list_devices()]:
+            print("  the phone is back", flush=True)
+            _wait_for_device[0] -= 1
+            try:
+                return screenshot()
+            finally:
+                _wait_for_device[0] += 1
     devices = "\n".join(f"{d['serial']}  {d['model']}" for d in list_devices()) or "(none ready)"
     raise RuntimeError(
         "screencap failed.\n"
@@ -421,6 +436,9 @@ def screenshot():
         "(a wireless phone can be listed twice - use only the ip:port one; "
         "'adb disconnect' the extras)."
     )
+
+
+_wait_for_device = [1]   # screenshot() waits for a missing phone this many levels deep (no endless recursion)
 
 
 LAST_FRAME = None    # the colour frame behind the latest gray_screen()
@@ -2048,6 +2066,10 @@ def watch_ad(cfg, base, log, home=None):
     answers = with_common(cfg.get("answer_templates", []), base, "answer_*.png")
     answer_taps, max_answers = 0, cfg.get("max_answer_taps", 12)
     answer_used = {}                  # answer picture -> taps on this ad
+    # "Give up the reward" buttons (giveup_*.png, e.g. the "Skip" in a survey's "Are you sure you
+    # want to skip the survey?" box): only once an answer picture has had its two taps on this ad,
+    # i.e. the survey can't be answered and its X keeps bringing the box back.
+    giveups = with_common(cfg.get("giveup_templates", []), base, "giveup_*.png")
     wake = cfg.get("wake_tap")            # [x, y] fractions; a tap that makes a faded badge reappear
     wake_taps, last_wake, wake_blocked = 0, 0.0, False
     wake_worked = False                   # a wake press has brought the badge up on this ad
@@ -2438,6 +2460,17 @@ def watch_ad(cfg, base, log, home=None):
                 acted("answer", hit[3])
                 answer_taps += 1
                 nap(1.2)
+                continue
+
+        if giveups and not passive and any(n >= 2 for n in answer_used.values()) and gray is not None:
+            ranked = [r for r in score_all(gray, giveups) if r[0] >= close_thr]
+            if ranked:
+                hit = ranked[0]
+                name = os.path.basename(hit[3])
+                log(f"  close via {name} ({hit[0]:.2f}) - the survey can't be answered, giving up its reward")
+                tap(hit[1], hit[2], jitter=2)
+                acted("close", hit[3])
+                nap(1.5)
                 continue
 
         # ---- close buttons -------------------------------------------------------------------

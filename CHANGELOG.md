@@ -4,6 +4,12 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A phone that drops off adb for a moment (Oct 18)
+- **A brief USB disconnect no longer stops adwatch.** When screenshots fail and the phone isn't in adb's device list, adwatch now says "the phone dropped off adb - waiting up to a minute for it", waits for it to come back and carries on. If it doesn't come back within a minute, it stops with the usual "screencap failed" message as before.
+
+### Surveys that can't be answered (Oct 17)
+- **A survey ad adwatch can't answer no longer loops for minutes.** Google's "Answer questions to earn a reward" surveys answer their X with "Are you sure you want to skip the survey? - Answer survey / Skip". adwatch tapped "Answer survey" (twice, as before), then kept tapping the X behind the box until it gave up. Once an answer picture has had its two taps on an ad, a **give-up picture** (`giveup_*.png` in `templates/common`, e.g. that box's "Skip") is now tapped: the ad ends without its reward, in seconds. It is logged as "close via giveup_N.png". Surveys adwatch *can* answer still get answered first.
+
 ### Ad buttons with cooldown timers (Oct 16)
 - **The ad loop can wait for an ad button to be ready.** For games whose ad buttons stay on screen and show a timer while they cool down: save just the part that only shows when the ad is ready (like a "▶ Free" pill), and set `wait_until_ready` on the step (the menu asks "Does the button show a timer..."). The loop then keeps looking for a ready button for that long, saying so once (and every 5 minutes), instead of counting a few seconds without one as a failure and restarting the game.
 - **Several ad buttons, whichever is ready.** Saving another ad button now asks whether it's another choice for the same step (`grab --then-ad --alt` on the command line). The step then taps whichever of its buttons is ready, instead of adding a second step that would need both in turn. Buttons that look the same need only one picture: it matches all of them.
