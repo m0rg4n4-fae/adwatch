@@ -4,6 +4,12 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Several phones at once (Oct 18)
+- **adwatch uses the phone the game is open on.** With several phones connected, `run` and `watch` check that the chosen phone shows the game; if it doesn't but exactly one other phone does, adwatch switches to that one and says so.
+- **Watch mode doesn't mistake another app's ad for the game's at start-up.** An ad from another app only counts when the game was in front shortly before.
+- **Phone labels in the logs.** With more than one phone connected, each line in `logs/adwatch.log` and `logs/debug.log` starts with the end of that phone's serial (e.g. `[3F9A]`), so runs on different phones can be told apart. `adwatch.log` lines now carry the time as well as the date.
+- **Stop or restart one phone's adwatch.** Drop `control/stop-SERIAL` or `control/restart-SERIAL` to steer only the adwatch running on that phone. A plain `control/stop` still works, but with two runs only one of them takes it.
+
 ### A phone that drops off adb for a moment (Oct 18)
 - **A brief USB disconnect no longer stops adwatch.** When screenshots fail and the phone isn't in adb's device list, adwatch now says "the phone dropped off adb - waiting up to a minute for it", waits for it to come back and carries on. If it doesn't come back within a minute, it stops with the usual "screencap failed" message as before.
 

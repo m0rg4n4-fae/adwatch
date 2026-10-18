@@ -93,11 +93,29 @@ DEBUG_LOG = os.path.join(DATA_DIR, "logs", "debug.log")
 _dbg = {"fh": None}
 
 
+_TAG = {"serial": None, "tag": ""}
+
+
+def phone_tag():
+    """'[3F9A] ' (the end of the phone's serial) when more than one phone is connected, so lines
+    from adwatch runs on different phones (or programs importing adwatch) can be told apart in the
+    shared logs; '' with one phone. Worked out once per phone."""
+    if not SERIAL:
+        return ""
+    if _TAG["serial"] != SERIAL:
+        _TAG["serial"] = SERIAL
+        try:
+            _TAG["tag"] = f"[{SERIAL[-4:]}] " if len(list_devices()) > 1 else ""
+        except Exception:
+            _TAG["tag"] = ""
+    return _TAG["tag"]
+
+
 def dlog(msg):
     """Detailed debug line: always appended to logs/debug.log (rotated at 5 MB), and printed
     too with -v. Meant for working out afterwards why something happened."""
     now = time.time()
-    line = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{int(now % 1 * 1000):03d} {msg}"
+    line = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{int(now % 1 * 1000):03d} {phone_tag()}{msg}"
     if VERBOSE:
         print("  \033[2m" + line + "\033[0m" if sys.stdout.isatty() else "  " + line, flush=True)
     try:
@@ -124,7 +142,7 @@ def make_log():
         try:
             os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
             with open(LOG_FILE, "a") as f:
-                f.write(time.strftime("%Y-%m-%d ") + line + "\n")
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + phone_tag() + str(msg) + "\n")
         except OSError:
             pass
     return log
@@ -147,9 +165,12 @@ def snapshot(reason, log=None):
 
 
 def control_signal():
-    """'stop' or 'restart' if one of those files was dropped into control/ (consumed on read)."""
-    for name in ("stop", "restart"):
-        p = os.path.join(CONTROL_DIR, name)
+    """'stop' or 'restart' if one of those files was dropped into control/ (consumed on read).
+    'stop-SERIAL' / 'restart-SERIAL' steer only the adwatch running on that phone."""
+    names = [(f"{n}-{SERIAL}", n) for n in ("stop", "restart")] if SERIAL else []
+    names += [(n, n) for n in ("stop", "restart")]
+    for fname, name in names:
+        p = os.path.join(CONTROL_DIR, fname)
         if os.path.exists(p):
             try:
                 os.remove(p)
@@ -878,6 +899,45 @@ def choose_device():
                  "\n  ".join(f"{d['serial']}  {d['model']}" for d in devs))
     SERIAL = d["serial"]
     print(f"using {d['model']} ({d['serial']})")
+
+
+def front_app(serial):
+    """Package in front on the given phone, or None (a quick dumpsys, no fast shell)."""
+    try:
+        out = subprocess.run([ADB, "-s", serial, "shell", "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'"],
+                             capture_output=True, timeout=8).stdout.decode(errors="replace")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    m = FOCUS_RE.search(out)
+    return m.group(1) if m else None
+
+
+def use_phone_with_game(pkg, log=print):
+    """With several phones connected, make sure adwatch controls the one the game is open on: if the
+    chosen phone doesn't show the game but exactly one other phone does, switch to that one."""
+    global SERIAL
+    devs = list_devices()
+    if len(devs) < 2:
+        return
+    if SERIAL and front_app(SERIAL) == pkg:
+        return
+    showing = [d for d in devs if d["serial"] != SERIAL and front_app(d["serial"]) == pkg]
+    if len(showing) != 1:
+        if SERIAL:
+            log(f"note: the game isn't open on the chosen phone ({SERIAL}) - watching it anyway")
+        return
+    d = showing[0]
+    if SERIAL:
+        log(f"the game is open on {d['model']} ({d['serial']}), not on the chosen phone ({SERIAL}) - using {d['model']}")
+    else:
+        log(f"using {d['model']} ({d['serial']}): the game is open there")
+    SERIAL = d["serial"]
+    os.environ["ADWATCH_SERIAL"] = SERIAL
+    if _FAST["obj"] is not None:                       # the fast shell talks to the old phone
+        _FAST["obj"].close()
+        _FAST["obj"] = None
+    _PHONE_NAME.clear()
+    _SCREEN["method"], _SCREEN["raw_fails"] = None, 0   # time screenshots again on this phone
 
 
 # ---------------------------------------------------------- template matching
@@ -2940,6 +3000,7 @@ def cmd_run(args):
     cooldown = cfg.get("cooldown_seconds", 5)
 
     log = make_log()
+    use_phone_with_game(cfg["package"], log)
     session_header(cfg, "run")
 
     if foreground() != cfg["package"]:
@@ -3275,6 +3336,7 @@ def cmd_watch(args):
     close_thr = cfg.get("close_threshold", thr)
 
     log = make_log()
+    use_phone_with_game(cfg["package"], log)
     session_header(cfg, "watch")
 
     home = learn_home(cfg, log, force=args.learn)
@@ -3294,7 +3356,7 @@ def cmd_watch(args):
         log(f"also dealing with the game's own pop-ups ({len(misc_buttons(cfg, base))} saved), every {misc_every}s")
     seen = closed = 0
     armed, away, last_hit, noted = True, False, None, None
-    game_seen = time.time()
+    game_seen = 0.0                    # when the game was last in front (another app's ad only counts soon after)
     deadline = time.time() + args.minutes * 60 if args.minutes else None
     try:
         while True:
