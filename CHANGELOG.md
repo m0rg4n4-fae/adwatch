@@ -5,6 +5,9 @@
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
 ### Several phones at once (Oct 18)
+- **Runs on different phones no longer overwrite each other's files.** `stats.json`, `decoys.json` and `.adwatch_state.json` are locked while being rewritten, and decoys are merged: a spot one phone learned to avoid is kept (and picked up) by the run on the other phone instead of being wiped by its next save. Programs that import adwatch get the same protection.
+- **A plain `control/stop` or `control/restart` now reaches every running adwatch**, not just whichever saw it first. Each run obeys it once, only if it was dropped after that run started, and it is cleared after 10 minutes. `stop-SERIAL` / `restart-SERIAL` still steer one phone. keepalive no longer throws away a plain stop meant for another phone when it starts.
+- Screens saved to `debug/` carry the phone label too when several phones are connected.
 - **adwatch uses the phone the game is open on.** With several phones connected, `run` and `watch` check that the chosen phone shows the game; if it doesn't but exactly one other phone does, adwatch switches to that one and says so.
 - **Watch mode doesn't mistake another app's ad for the game's at start-up.** An ad from another app only counts when the game was in front shortly before.
 - **Phone labels in the logs.** With more than one phone connected, each line in `logs/adwatch.log` and `logs/debug.log` starts with the end of that phone's serial (e.g. `[3F9A]`), so runs on different phones can be told apart. `adwatch.log` lines now carry the time as well as the date.

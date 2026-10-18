@@ -171,6 +171,13 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 
 `adwatch keepalive run GAME ...` (or `keepalive watch ...`) runs unattended: it restarts after a crash and, if adwatch stops because of repeated problems, waits for a file called `restart` in the `control/` folder before starting again. Everything is logged to `logs/adwatch.log`, and the screen is saved to `debug/` whenever something goes wrong.
 
+**Several phones at once.** Start one adwatch per phone, each with its own `-s SERIAL`. They share your saved buttons, decoys and statistics (safely: neither run overwrites what the other saved). With more than one phone connected, log lines and saved screens are labelled with the end of the phone's serial, e.g. `[3F9A]`. To steer runs from the `control/` folder:
+
+| File | Effect |
+|---|---|
+| `stop` / `restart` | every adwatch that's running, on every phone |
+| `stop-SERIAL` / `restart-SERIAL` | only the adwatch on that phone |
+
 </details>
 
 <details>

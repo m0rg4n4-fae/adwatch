@@ -24,6 +24,7 @@ to its profile file). Commands:
   step   NAME KIND ...    append watch_ad / wait N / key NAME / tap_xy X Y
 """
 import argparse
+import contextlib
 import glob
 import json
 import os
@@ -34,6 +35,11 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+
+try:
+    import fcntl                # file locks (Linux/macOS); Windows runs without them
+except ImportError:
+    fcntl = None
 
 try:
     import cv2
@@ -153,7 +159,7 @@ def snapshot(reason, log=None):
     try:
         dbg = os.path.join(DATA_DIR, "debug")
         os.makedirs(dbg, exist_ok=True)
-        name = time.strftime("%Y%m%d-%H%M%S") + "_" + re.sub(r"[^a-z0-9]+", "-", reason.lower()).strip("-") + ".png"
+        name = time.strftime("%Y%m%d-%H%M%S") + "_" + re.sub(r"[^a-z0-9]+", "-", (phone_tag() + reason).lower()).strip("-") + ".png"
         cv2.imwrite(os.path.join(dbg, name), screenshot())
         if log:
             log(f"  saved the screen to debug/{name}")
@@ -164,18 +170,38 @@ def snapshot(reason, log=None):
         pass
 
 
+_STARTED = time.time()      # control files dropped before this adwatch started are old news
+_PLAIN_SEEN = {}            # plain control file -> time of the one this adwatch already obeyed
+
+
 def control_signal():
-    """'stop' or 'restart' if one of those files was dropped into control/ (consumed on read).
-    'stop-SERIAL' / 'restart-SERIAL' steer only the adwatch running on that phone."""
-    names = [(f"{n}-{SERIAL}", n) for n in ("stop", "restart")] if SERIAL else []
-    names += [(n, n) for n in ("stop", "restart")]
-    for fname, name in names:
-        p = os.path.join(CONTROL_DIR, fname)
-        if os.path.exists(p):
+    """'stop' or 'restart' if one of those files was dropped into control/.
+    'stop-SERIAL' / 'restart-SERIAL' steer only the adwatch running on that phone (consumed on read).
+    A plain 'stop' / 'restart' steers every adwatch that is running, on any phone: each one obeys it
+    once if it was dropped after that adwatch started. Plain files are cleared after 10 minutes."""
+    if SERIAL:
+        for name in ("stop", "restart"):
+            p = os.path.join(CONTROL_DIR, f"{name}-{SERIAL}")
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+                return name
+    for name in ("stop", "restart"):
+        p = os.path.join(CONTROL_DIR, name)
+        try:
+            dropped = os.path.getmtime(p)
+        except OSError:
+            continue
+        if time.time() - dropped > 600:
             try:
                 os.remove(p)
             except OSError:
                 pass
+            continue
+        if dropped >= _STARTED and dropped > _PLAIN_SEEN.get(name, 0):
+            _PLAIN_SEEN[name] = dropped
             return name
     return None
 
@@ -190,6 +216,25 @@ def obey_control(log):
         sys.exit(RESTART_CODE)
 
 
+@contextlib.contextmanager
+def locked(path):
+    """Hold a lock (PATH.lock) while reading and rewriting a shared file, so adwatch runs on other
+    phones (and programs importing adwatch) don't write it at the same moment."""
+    fh = None
+    if fcntl is not None:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            fh = open(path + ".lock", "a")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        except OSError:
+            fh = None
+    try:
+        yield
+    finally:
+        if fh is not None:
+            fh.close()                          # closing releases the lock
+
+
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -199,10 +244,15 @@ def load_state():
 
 
 def save_state(state):
+    """Replace the saved state (callers pass dict(load_state(), ...)). Written whole, under a lock,
+    so another adwatch reading it never sees half a file."""
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
+        with locked(STATE_FILE):
+            tmp = STATE_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(state, f)
+            os.replace(tmp, STATE_FILE)
     except OSError:
         pass
 
@@ -1437,26 +1487,35 @@ def _write_json(path, data):
         dlog(f"could not write {os.path.basename(path)}: {e}")
 
 
+def _merge_decoys(saved):
+    """Add what decoys.json holds to the decoys in memory; the higher count wins."""
+    for kind in ("close", "ui"):
+        for k, n in (saved.get(kind) or {}).items():
+            if isinstance(n, int):
+                DECOYS[kind][k] = max(DECOYS[kind].get(k, 0), n)
+    for kind, fields in (("near", ("tapped", "closed")), ("wake", ("store", "badge"))):
+        mine = DECOYS.setdefault(kind, {})
+        for k, rec in (saved.get(kind) or {}).items():
+            if isinstance(rec, dict):
+                cur = mine.setdefault(k, dict.fromkeys(fields, 0))    # updated in place: others hold it
+                for f in fields:
+                    cur[f] = max(cur.get(f, 0), int(rec.get(f, 0)))
+
+
 def load_decoys():
     """Decoys found in earlier runs: {"close": {"close_30.png@P3,5": times}, "ui": {"label": times}}."""
     if not DECOYS.get("_loaded"):
-        saved = _read_json(DECOY_FILE, {})
-        for kind in ("close", "ui"):
-            for k, n in (saved.get(kind) or {}).items():
-                if isinstance(n, int):
-                    DECOYS[kind][k] = max(DECOYS[kind].get(k, 0), n)
-        for k, rec in (saved.get("near") or {}).items():
-            if isinstance(rec, dict):
-                DECOYS.setdefault("near", {})[k] = {n: int(rec.get(n, 0)) for n in ("tapped", "closed")}
-        for k, rec in (saved.get("wake") or {}).items():
-            if isinstance(rec, dict):
-                DECOYS.setdefault("wake", {})[k] = {n: int(rec.get(n, 0)) for n in ("store", "badge")}
+        _merge_decoys(_read_json(DECOY_FILE, {}))
         DECOYS["_loaded"] = True
 
 
 def save_decoys():
-    _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"], "wake": DECOYS.get("wake", {}),
-                            "near": DECOYS.get("near", {})})
+    """Write the decoys, merged with what adwatch runs on other phones saved since (so neither run
+    wipes out what the other learned)."""
+    with locked(DECOY_FILE):
+        _merge_decoys(_read_json(DECOY_FILE, {}))
+        _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"], "wake": DECOYS.get("wake", {}),
+                                "near": DECOYS.get("near", {})})
 
 
 _WAKE_SKIP_SAID = set()   # ad kinds already told about (said once per run)
@@ -1504,23 +1563,29 @@ def phone_label():
 def record_ad(pkg, outcome, seconds):
     """Count one ad in stats.json: per game, per phone and in total. outcome: 'watched' or 'gave_up'."""
     try:
-        stats = _read_json(STATS_FILE, {})
-        day = time.strftime("%Y-%m-%d")
-        for group, name in (("games", pkg or "?"), ("phones", phone_label()), ("total", None)):
-            box = stats.setdefault(group, {})
-            if name is not None:
-                box = box.setdefault(name, {})
-            box[outcome] = box.get(outcome, 0) + 1
-            box["seconds"] = round(box.get("seconds", 0) + max(0.0, seconds))
-            if outcome == "watched":
-                days = box.setdefault("days", {})
-                days[day] = days.get(day, 0) + 1
-                for old in sorted(days)[:-60]:          # keep two months of daily counts
-                    del days[old]
-        stats.setdefault("since", day)
-        _write_json(STATS_FILE, stats)
+        with locked(STATS_FILE):            # another phone's adwatch may be counting an ad right now
+            _count_ad(pkg, outcome, seconds)
     except Exception as e:                              # statistics must never stop a run
         dlog(f"stats: not recorded ({e})")
+
+
+def _count_ad(pkg, outcome, seconds):
+    """Add one ad to stats.json (called with its lock held)."""
+    stats = _read_json(STATS_FILE, {})
+    day = time.strftime("%Y-%m-%d")
+    for group, name in (("games", pkg or "?"), ("phones", phone_label()), ("total", None)):
+        box = stats.setdefault(group, {})
+        if name is not None:
+            box = box.setdefault(name, {})
+        box[outcome] = box.get(outcome, 0) + 1
+        box["seconds"] = round(box.get("seconds", 0) + max(0.0, seconds))
+        if outcome == "watched":
+            days = box.setdefault("days", {})
+            days[day] = days.get(day, 0) + 1
+            for old in sorted(days)[:-60]:          # keep two months of daily counts
+                del days[old]
+    stats.setdefault("since", day)
+    _write_json(STATS_FILE, stats)
 
 
 # ------------------------------------------------ accessibility-tree fallback
