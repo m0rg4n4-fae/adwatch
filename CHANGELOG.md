@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Ads that hide their picture from screenshots (Oct 19)
+- **An ad whose picture is all black is no longer taken for one that has ended.** Some ad videos block screenshots, so adwatch sees a black screen while the ad is still playing on the phone; it took the still black picture for "the ad has ended and shows nothing to tap", pressed BACK and gave up after ~37 s, losing the reward (Idle Soap ASMR on a Galaxy Note 9, 2 of 141 ads). When at least 80% of the screen is black (`hidden_black_fraction`) and no progress bar has been seen moving, adwatch now says "the ad's picture is hidden from screenshots (black) - it may still be playing" and waits the full `ad_max_seconds` before BACK, while still tapping any close button that shows up.
+
 ### Several phones at once (Oct 18)
 - **adwatch won't touch a phone another program is using.** `run` and `watch` claim their phone while they work, and stop with "the phone ... is in use by ..." if another program has claimed it (another adwatch, or your own bot: see README, "Phones in use by other programs"). Switching to the phone the game is open on skips claimed phones, and the menu marks them "in use" and won't pick one just because it was used last time. (This came from a watch started from the menu on the phone used last time, while another bot was running there.)
 - **Runs on different phones no longer overwrite each other's files.** `stats.json`, `decoys.json` and `.adwatch_state.json` are locked while being rewritten, and decoys are merged: a spot one phone learned to avoid is kept (and picked up) by the run on the other phone instead of being wiped by its next save. Programs that import adwatch get the same protection.

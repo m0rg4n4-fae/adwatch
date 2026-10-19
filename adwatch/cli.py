@@ -2339,6 +2339,7 @@ def watch_ad(cfg, base, log, home=None):
     blocked_ui, blocked_spots = set(), set()
     bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = {}, 0.0, False, None, False
     ring, said_ring = CountdownRing(), False
+    said_hidden = False                   # said that the ad's picture is black (hidden from screenshots)
     prev_small, looks, video_looks, last_video, said_ended = None, 0, 0, 0.0, False
     near_seen, near_tapped, game_looks = {}, set(), 0
     # Google's "Close Ad? You will lose your reward" box, as a picture (resume_*.png) for when
@@ -2630,7 +2631,15 @@ def watch_ad(cfg, base, log, home=None):
         said_playing = playing
         # Has it visibly ended? A bar that ran and stopped (or reached the end), a video that
         # played and then held still, or a picture that never moved at all.
-        ended = not playing and (
+        # A picture that is nearly all black: most likely an ad video that hides itself from
+        # screenshots (still playing on the phone), not one that has ended. It gets the full wait.
+        # (A progress bar seen moving means the picture isn't hidden: it would be black too.)
+        hidden = (gray is not None and not bar_seen_moving
+                  and float((gray < 12).mean()) >= cfg.get("hidden_black_fraction", 0.8))
+        if hidden and not said_hidden:
+            log("  the ad's picture is hidden from screenshots (black) - it may still be playing, waiting for it")
+            said_hidden = True
+        ended = not playing and not hidden and (
             (bar_seen_moving and (bar_at or 0) >= 0.97) or
             (bar_seen_moving and now - last_moving >= still_need) or
             (video_looks >= 2 and now - last_video >= still_need) or
