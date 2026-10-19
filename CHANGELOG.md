@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Countdown rings that never end (Oct 19)
+- **A "countdown ring" no longer holds an ad for minutes.** Something round in a corner that kept changing (not a real timer) was taken for a countdown and kept adwatch from looking for a close button for ~3 minutes (Idle Soap ASMR, Galaxy Note 9). Real countdowns last 5-30 s, so a ring still "ticking" after `ring_max_seconds` (60) is no longer trusted: adwatch says so once, saves the screen to `debug/` ("ring-held") and looks for a close button as usual.
+
 ### Ads that hide their picture from screenshots (Oct 19)
 - **An ad whose picture is all black is no longer taken for one that has ended.** Some ad videos block screenshots, so adwatch sees a black screen while the ad is still playing on the phone; it took the still black picture for "the ad has ended and shows nothing to tap", pressed BACK and gave up after ~37 s, losing the reward (Idle Soap ASMR on a Galaxy Note 9, 2 of 141 ads). When at least 80% of the screen is black (`hidden_black_fraction`) and no progress bar has been seen moving, adwatch now says "the ad's picture is hidden from screenshots (black) - it may still be playing" and waits the full `ad_max_seconds` before BACK, while still tapping any close button that shows up.
 
