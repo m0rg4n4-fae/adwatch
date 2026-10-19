@@ -1614,10 +1614,11 @@ def _write_json(path, data):
 
 def _merge_decoys(saved):
     """Add what decoys.json holds to the decoys in memory; the higher count wins."""
-    for kind in ("close", "ui"):
+    for kind in ("close", "ui", "close_ok"):
+        mine = DECOYS.setdefault(kind, {})
         for k, n in (saved.get(kind) or {}).items():
             if isinstance(n, int):
-                DECOYS[kind][k] = max(DECOYS[kind].get(k, 0), n)
+                mine[k] = max(mine.get(k, 0), n)
     for kind, fields in (("near", ("tapped", "closed")), ("wake", ("store", "badge"))):
         mine = DECOYS.setdefault(kind, {})
         for k, rec in (saved.get(kind) or {}).items():
@@ -1640,7 +1641,7 @@ def save_decoys():
     with locked(DECOY_FILE):
         _merge_decoys(_read_json(DECOY_FILE, {}))
         _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"], "wake": DECOYS.get("wake", {}),
-                                "near": DECOYS.get("near", {})})
+                                "near": DECOYS.get("near", {}), "close_ok": DECOYS.get("close_ok", {})})
 
 
 _WAKE_SKIP_SAID = set()   # ad kinds already told about (said once per run)
@@ -2234,7 +2235,7 @@ def recover(cfg, base, log, attempts=6):
     return False
 
 
-DECOYS = {"ui": {}, "close": {}, "wake": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store;
+DECOYS = {"ui": {}, "close": {}, "wake": {}, "close_ok": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store;
 # "wake": ad screen name -> {"store": wake presses that opened the store, "badge": ones that brought the badge up}
 # "near": close picture -> {"tapped": near-miss taps on it, "closed": ones the ad closed right after}
 LAST_AD_END = {"why": None}        # why the last watch_ad gave up: "timeout" or "store-loop"
@@ -2353,7 +2354,13 @@ def watch_ad(cfg, base, log, home=None):
     LAST_AD_END["why"] = None
 
     def decoy_spots():
-        return blocked_spots | {tuple(k.rsplit("@", 1)) for k, n in DECOYS["close"].items() if n >= 2 and "@" in k}
+        # A spot counts as a decoy after opening the store on 2 ads, minus the ads it turned out to
+        # close after all ("close_ok": both counts only grow, so runs on other phones merge safely).
+        ok = DECOYS.get("close_ok", {})
+        return blocked_spots | {tuple(k.rsplit("@", 1)) for k, n in DECOYS["close"].items()
+                                if n - ok.get(k, 0) >= 2 and "@" in k}
+
+    decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot
@@ -2402,6 +2409,11 @@ def watch_ad(cfg, base, log, home=None):
         LAST_AD_END["why"] = why
         if result is True and last_near and time.time() - last_near[1] < 8:
             near_record(last_near[0], "closed")           # the near-miss tap was the way out
+        if result is True and decoy_try and time.time() - decoy_try[1] < 15:
+            ok = DECOYS.setdefault("close_ok", {})
+            ok[decoy_try[0]] = ok.get(decoy_try[0], 0) + 1
+            save_decoys()
+            log(f"  {decoy_try[0].split('@')[0]} closed the ad there after all - it can be tapped there again")
         if result is not None:
             record_ad(pkg, "gave_up" if result is False else "watched", time.time() - start)
         return result
@@ -2954,6 +2966,18 @@ def watch_ad(cfg, base, log, home=None):
                 back_presses = 0
                 last_act = ("returned", "", time.time(), None)
                 continue
+            # Before BACK: a close picture held back only because it opened the store on earlier ads
+            # (decoys.json) gets one try. Many real X's sit where a decoy once was (a top corner);
+            # if it closes this ad, the spot is forgiven.
+            if back_presses == 0 and decoy_try is None and close and gray is not None:
+                remembered = decoy_spots() - blocked_spots
+                hit, _ = find_button(gray, close, close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
+                k = (os.path.basename(hit[3]), spot_of(hit[1], hit[2], gray.shape[1], gray.shape[0])) if hit else None
+                if k in remembered:
+                    decoy_try = (f"{k[0]}@{k[1]}", time.time())
+                    log(f"  nothing else to tap: trying {k[0]} once, though it opened the store here on earlier ads")
+                    tap_button(hit, "close", gray, " - a second chance")
+                    continue
             if back_presses >= (2 if fast and quiet < max_s else 3):
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)

@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Remembered decoys get a second chance (Oct 19)
+- **A close picture remembered as a decoy no longer blocks a real X there for good.** Once a close picture opened the store in a spot on 2 ads, adwatch never tapped it in that spot again, on any ad. That blocked real X's in the top corners, where most of them sit (Idle Soap ASMR: a plain X at the top left ignored, BACK pressed, 88 s). Now, when an ad shows nothing else to tap and adwatch is about to press BACK, it tries such a picture once ("a second chance"). If that closes the ad, the spot is forgiven (`close_ok` in `decoys.json`) and the picture can be tapped there again; if it opens the store, it stays blocked as before.
+
 ### Countdown rings that never end (Oct 19)
 - **A "countdown ring" no longer holds an ad for minutes.** Something round in a corner that kept changing (not a real timer) was taken for a countdown and kept adwatch from looking for a close button for ~3 minutes (Idle Soap ASMR, Galaxy Note 9). Real countdowns last 5-30 s, so a ring still "ticking" after `ring_max_seconds` (60) is no longer trusted: adwatch says so once, saves the screen to `debug/` ("ring-held") and looks for a close button as usual.
 
