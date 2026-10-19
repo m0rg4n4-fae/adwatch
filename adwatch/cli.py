@@ -2321,6 +2321,11 @@ def watch_ad(cfg, base, log, home=None):
     # want to skip the survey?" box): only once an answer picture has had its two taps on this ad,
     # i.e. the survey can't be answered and its X keeps bringing the box back.
     giveups = with_common(cfg.get("giveup_templates", []), base, "giveup_*.png")
+    # Ads known to have no way out (deadend_*.png, e.g. a playable survey with no close button
+    # where BACK does nothing): seen on 2 looks in a row past the minimum wait, the ad is given up
+    # on at once instead of after minutes of BACK presses (the caller restarts the game).
+    deadends = with_common(cfg.get("deadend_templates", []), base, "deadend_*.png")
+    deadend_looks = 0
     wake = cfg.get("wake_tap")            # [x, y] fractions; a tap that makes a faded badge reappear
     wake_taps, last_wake, wake_blocked = 0, 0.0, False
     wake_worked = False                   # a wake press has brought the badge up on this ad
@@ -2743,6 +2748,15 @@ def watch_ad(cfg, base, log, home=None):
                 answer_taps += 1
                 nap(1.2)
                 continue
+
+        if deadends and gray is not None and elapsed >= wait_s:
+            ranked = [r for r in score_all(gray, deadends) if r[0] >= close_thr]
+            deadend_looks = deadend_looks + 1 if ranked else 0
+            if deadend_looks >= 2:
+                log(f"  this ad is a known dead end ({os.path.basename(ranked[0][3])} {ranked[0][0]:.2f}): "
+                    "no way out - giving up on it now")
+                snapshot("dead-end", log)
+                return finish(False, "dead-end")
 
         if giveups and not passive and any(n >= 2 for n in answer_used.values()) and gray is not None:
             ranked = [r for r in score_all(gray, giveups) if r[0] >= close_thr]
@@ -3949,9 +3963,10 @@ def cmd_grab(args):
         sys.exit("cancelled")
 
     root = os.path.dirname(os.path.dirname(p))
-    if args.close or args.stuck or getattr(args, "popup", False) or getattr(args, "skip", False):
+    if args.close or args.stuck or getattr(args, "popup", False) or getattr(args, "skip", False) \
+            or getattr(args, "deadend", False):
         kind = ("close" if args.close else "stuck" if args.stuck else "popup" if getattr(args, "popup", False)
-                else "skip")
+                else "deadend" if getattr(args, "deadend", False) else "skip")
         d = os.path.join(root, "templates", "common")
         n = 1
         while os.path.exists(os.path.join(d, f"{kind}_{n}.png")):
@@ -4869,6 +4884,8 @@ def main():
                    help="with --misc: what to do with it (default: tap it)")
     g.add_argument("--skip", action="store_true",
                    help="save as a shared skip / 'reward granted' button: tapped as soon as it appears")
+    g.add_argument("--deadend", action="store_true",
+                   help="save as a shared 'dead end' ad (no way out, BACK does nothing): given up on at once")
     g.add_argument("--stuck", action="store_true",
                    help="save as a shared ad 'exit via store' button (tapped only if no close button appears)")
     g.add_argument("--delay", type=int, default=0, help="seconds to wait before the screenshot")

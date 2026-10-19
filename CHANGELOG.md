@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Dead-end ads (Oct 19)
+- **New picture type for ads with no way out: `grab GAME LABEL --deadend`** (saved as `templates/common/deadend_N.png`). Some playable ads (a "SurveyPop - answer 5 questions" card on Word Search Explorer) have no close button and ignore BACK; adwatch pressed BACK for ~110 s before giving up, every time. When a dead-end picture is seen on 2 looks in a row after the minimum wait, adwatch now says "this ad is a known dead end", saves the screen and gives up on it straight away (the ad loop, or a bot using adwatch, then restarts the game). Works in watch mode too.
+
 ### Remembered decoys get a second chance (Oct 19)
 - **A close picture remembered as a decoy no longer blocks a real X there for good.** Once a close picture opened the store in a spot on 2 ads, adwatch never tapped it in that spot again, on any ad. That blocked real X's in the top corners, where most of them sit (Idle Soap ASMR: a plain X at the top left ignored, BACK pressed, 88 s). Now, when an ad shows nothing else to tap and adwatch is about to press BACK, it tries such a picture once ("a second chance"). If that closes the ad, the spot is forgiven (`close_ok` in `decoys.json`) and the picture can be tapped there again; if it opens the store, it stays blocked as before.
 
