@@ -3741,6 +3741,28 @@ def cmd_watch(args):
         log(f"also dealing with the game's own pop-ups ({len(misc_buttons(cfg, base))} saved), every {misc_every}s")
     seen = closed = 0
     armed, away, last_hit, noted = True, False, None, None
+    # Unattended: an ad that can't be closed gets the game restarted instead of waiting for a
+    # person, at most max_restarts in any hour (then it waits for one after all).
+    restart_stuck = bool(getattr(args, "restart_stuck", False) or cfg.get("watch_restart_stuck", False))
+    restarts = []                      # when the game was restarted
+
+    def gave_up():
+        nonlocal armed, game_seen
+        recent = [t for t in restarts if time.time() - t < 3600]
+        restarts[:] = recent
+        if restart_stuck and len(recent) < cfg.get("max_restarts", 5):
+            restarts.append(time.time())
+            restart_game(pkg, log, cfg.get("restart_wait_seconds", 15))
+            armed, game_seen = True, time.time()
+            log(f"  game restarted ({len(restarts)} in the last hour) - watching again")
+            return
+        armed = False
+        if restart_stuck:
+            log(f"  {len(recent)} game restarts in the last hour already - leaving this one for you")
+        log("  couldn't close this one - close it by hand; watching resumes when the game is back"
+            + ("" if cfg["_teach"] or restart_stuck else " (run with --teach to save its button)"))
+    if restart_stuck:
+        log(f"ads that can't be closed: the game is restarted (at most {cfg.get('max_restarts', 5)} an hour)")
     game_seen = 0.0                    # when the game was last in front (another app's ad only counts soon after)
     deadline = time.time() + args.minutes * 60 if args.minutes else None
     try:
@@ -3764,10 +3786,10 @@ def cmd_watch(args):
                 close = with_common(cfg.get("close_templates", []), base, "close_*.png")
                 if res == "closed":
                     closed += 1
+                elif res is False:
+                    gave_up()
                 elif res != "gone":
                     armed = False
-                    if res is False:
-                        log("  couldn't close this one - close it by hand; watching resumes when the game is back")
                 game_seen = time.time()
                 nap(1)
                 continue
@@ -3862,11 +3884,10 @@ def cmd_watch(args):
             close = with_common(cfg.get("close_templates", []), base, "close_*.png")  # --teach may add some
             if res == "closed":
                 closed += 1
-            elif res != "gone":                # gave up, or the user left: don't keep poking it
+            elif res is False:                 # gave up: restart the game, or leave it for a person
+                gave_up()
+            elif res != "gone":                # the user left: don't keep poking it
                 armed = False
-                if res is False:
-                    log("  couldn't close this one - close it by hand; watching resumes when the game is back"
-                        + ("" if cfg["_teach"] else " (run with --teach to save its button)"))
             nap(1)
     finally:
         log(f"saw {seen} ad(s), closed {closed}; {game_total(cfg['package'])} ads in this game so far")
@@ -4985,6 +5006,9 @@ def main():
     w.add_argument("--teach", action="store_true",
                    help="pause when an ad has no known button so you can save one, then continue")
     w.add_argument("--learn", action="store_true", help="add the current screen as one of the game's normal screens")
+    w.add_argument("--restart-stuck", action="store_true", dest="restart_stuck",
+                   help="unattended: restart the game when an ad can't be closed (at most max_restarts an hour), "
+                        "instead of waiting for you to close it")
     sc = sub.add_parser("screens", help="teach the game's own screens so watch mode never takes them for ads")
     sc.add_argument("profile", metavar="GAME")
     sc.add_argument("--add", action="store_true", help="save the screen the game is on now, without asking")

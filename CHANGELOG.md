@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Watch mode on its own: restart the game when an ad is stuck (Oct 21)
+- **`adwatch watch GAME --restart-stuck`** (or `"watch_restart_stuck": true` in a profile) is for leaving watch mode running unattended, e.g. overnight under `keepalive`. When an ad can't be closed, watch mode used to say "close it by hand" and wait, so one stuck ad stalled the game until someone came back. With this flag the game is force-stopped and reopened (like the ad loop does) and watching carries on, at most `max_restarts` (5) times in any hour; past that it leaves the ad for you as before. Off by default, because in watch mode you may be playing.
+
 ### Learning which ads have no way out (Oct 20)
 - **adwatch now learns ads that can't be closed and gives up on them sooner.** Playables with no close button that ignore BACK (card flips, "Earn gift cards", "open this pack") kept adwatch busy for 60-160 s before it gave up, each time. When it gives up on an ad, adwatch now keeps a tiny picture of how it looked (`dead_looks.json`). Once the same look has been given up on twice, the next ad that looks like it gets one BACK after `no_exit_seconds` (20 s) with nothing to tap and is then given up on (about 40 s in all), saying "this ad looks like one that couldn't be closed on earlier ads". A close button that shows up meanwhile is still tapped, and an ad with that look that does close counts against it. Turn it off with `"learn_dead_ends": false`. A dead-end picture (`grab --deadend`) still gives up at once.
 

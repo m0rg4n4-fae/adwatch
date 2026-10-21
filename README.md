@@ -152,7 +152,7 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 |---|---|
 | `adwatch` | the menu |
 | `adwatch run GAME [-n N] [--teach]` | ad loop. `--teach` pauses on an ad it can't close so you can save its button |
-| `adwatch watch GAME [-n N] [--minutes M] [--scan] [--teach] [--learn]` | close ads that appear by themselves |
+| `adwatch watch GAME [-n N] [--minutes M] [--scan] [--teach] [--learn] [--restart-stuck]` | close ads that appear by themselves. `--restart-stuck` (for unattended runs) restarts the game when an ad can't be closed |
 | `adwatch screens GAME [--add] [--remove N]` | teach the game's own screens (lobby, shop, settings...) so watch mode never takes them for ads |
 | `adwatch new NAME` | add a game (have it open on the phone) |
 | `adwatch grab GAME LABEL --then-ad [--alt] [--wait-ready SECONDS]` | save an ad button; `--alt` adds it as another choice for the existing one, `--wait-ready` waits for a ready one (cooldown timers) |
@@ -169,7 +169,7 @@ Everything in the menu is also a command, for scripts and for people who prefer 
 
 `-s SERIAL` before the command picks a phone when several are connected. `--screen raw|png|auto` picks the adb screenshot format (auto times both once and uses the faster: raw usually wins over USB, png over Wi-Fi). `--no-fast-taps` sends each tap as its own adb command, for phones where the faster way misbehaves. `--no-keep-awake` / `--keep-awake` override the Settings choice for keeping the computer from sleeping during a run (on by default). `-v` prints the detailed debug log as it runs; it is always written to `logs/debug.log` either way (screen-grab and matching times, every score, tap and key, and why each decision was made).
 
-`adwatch keepalive run GAME ...` (or `keepalive watch ...`) runs unattended: it restarts after a crash and, if adwatch stops because of repeated problems, waits for a file called `restart` in the `control/` folder before starting again. Everything is logged to `logs/adwatch.log`, and the screen is saved to `debug/` whenever something goes wrong.
+`adwatch keepalive run GAME ...` (or `keepalive watch ...`) runs unattended: it restarts after a crash and, if adwatch stops because of repeated problems, waits for a file called `restart` in the `control/` folder before starting again. Everything is logged to `logs/adwatch.log`, and the screen is saved to `debug/` whenever something goes wrong. For a `watch` left on its own, add `--restart-stuck` (`adwatch keepalive watch GAME --restart-stuck`): an ad that can't be closed then gets the game force-stopped and reopened, at most `max_restarts` (5) times an hour, instead of waiting for you to close it by hand. Leave it off while you're playing yourself.
 
 **Several phones at once.** Start one adwatch per phone, each with its own `-s SERIAL`. They share your saved buttons, decoys and statistics (safely: neither run overwrites what the other saved). With more than one phone connected, log lines and saved screens are labelled with the end of the phone's serial, e.g. `[3F9A]`. To steer runs from the `control/` folder:
 
