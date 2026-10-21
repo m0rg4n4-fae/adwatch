@@ -24,6 +24,7 @@ to its profile file). Commands:
   step   NAME KIND ...    append watch_ad / wait N / key NAME / tap_xy X Y
 """
 import argparse
+import base64
 import contextlib
 import glob
 import json
@@ -1695,6 +1696,67 @@ def save_decoys():
                                 "near": DECOYS.get("near", {}), "close_ok": DECOYS.get("close_ok", {})})
 
 
+# ------------------------------------------------ ads learned to have no way out
+# A small picture of how an ad looked when it had to be given up on. The same look given up on
+# twice (and not closed in between) is "known dead": the next ad that looks like it gets one BACK
+# and is then given up on, instead of minutes of waiting. Shared by every run, written under lock.
+DEAD_LOOKS_FILE = os.path.join(DATA_DIR, "dead_looks.json")
+
+
+def look_thumb(gray):
+    """The screen shrunk to 54x120 (120x54 in landscape), or None for a plain/black screen."""
+    if gray is None:
+        return None
+    h, w = gray.shape[:2]
+    t = cv2.resize(gray, (54, 120) if h >= w else (120, 54), interpolation=cv2.INTER_AREA)
+    return t if t.std() >= 3 else None
+
+
+def same_look(a, b, need=0.95):
+    return a.shape == b.shape and float(cv2.matchTemplate(a, b, cv2.TM_CCOEFF_NORMED)[0][0]) >= need
+
+
+def _dead_thumb(rec):
+    try:
+        return np.frombuffer(base64.b64decode(rec["px"]), np.uint8).reshape(rec["h"], rec["w"])
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def dead_known(rec):
+    """Given up on twice for every time an ad with this look closed after all (plus one)."""
+    return rec.get("gave_up", 0) >= 2 * (rec.get("closed", 0) + 1)
+
+
+def dead_looks():
+    """[(thumb, record)] of the looks that are known dead."""
+    out = []
+    for rec in _read_json(DEAD_LOOKS_FILE, []):
+        t = _dead_thumb(rec) if isinstance(rec, dict) else None
+        if t is not None and dead_known(rec):
+            out.append((t, rec))
+    return out
+
+
+def dead_look_record(thumb, outcome):
+    """Count `outcome` ("gave_up" / "closed") for this look; a new look is only added on "gave_up"."""
+    with locked(DEAD_LOOKS_FILE):
+        recs = [r for r in _read_json(DEAD_LOOKS_FILE, []) if isinstance(r, dict)]
+        for rec in recs:
+            t = _dead_thumb(rec)
+            if t is not None and same_look(thumb, t):
+                rec[outcome] = rec.get(outcome, 0) + 1
+                rec["last"] = time.strftime("%Y-%m-%d %H:%M")
+                break
+        else:
+            if outcome != "gave_up":
+                return
+            recs.append({"w": thumb.shape[1], "h": thumb.shape[0], "px": base64.b64encode(thumb.tobytes()).decode(),
+                         "gave_up": 1, "closed": 0, "last": time.strftime("%Y-%m-%d %H:%M")})
+        recs.sort(key=lambda r: r.get("last", ""))
+        _write_json(DEAD_LOOKS_FILE, recs[-60:])
+
+
 _WAKE_SKIP_SAID = set()   # ad kinds already told about (said once per run)
 
 
@@ -2377,6 +2439,10 @@ def watch_ad(cfg, base, log, home=None):
     # on at once instead of after minutes of BACK presses (the caller restarts the game).
     deadends = with_common(cfg.get("deadend_templates", []), base, "deadend_*.png")
     deadend_looks = 0
+    # Looks learned to have no way out (dead_looks.json): one BACK, then give up.
+    learn_dead = cfg.get("learn_dead_ends", True)
+    known_looks = dead_looks() if learn_dead else []
+    dead_seen, dead_hit, said_dead = 0, None, False
     wake = cfg.get("wake_tap")            # [x, y] fractions; a tap that makes a faded badge reappear
     wake_taps, last_wake, wake_blocked = 0, 0.0, False
     wake_worked = False                   # a wake press has brought the badge up on this ad
@@ -2465,6 +2531,8 @@ def watch_ad(cfg, base, log, home=None):
         LAST_AD_END["why"] = why
         if result is True and last_near and time.time() - last_near[1] < 8:
             near_record(last_near[0], "closed")           # the near-miss tap was the way out
+        if result is True and dead_hit is not None:
+            dead_look_record(dead_hit, "closed")         # it looked dead but closed: count against the look
         if result is True and decoy_try and time.time() - decoy_try[1] < 15:
             ok = DECOYS.setdefault("close_ok", {})
             ok[decoy_try[0]] = ok.get(decoy_try[0], 0) + 1
@@ -2811,6 +2879,17 @@ def watch_ad(cfg, base, log, home=None):
                 snapshot("dead-end", log)
                 return finish(False, "dead-end")
 
+        if known_looks and gray is not None and elapsed >= wait_s and not playing and not hidden:
+            th = look_thumb(gray)
+            m = next((t for t, _ in known_looks if th is not None and same_look(th, t)), None)
+            dead_seen = dead_seen + 1 if m is not None else 0
+            if m is not None:
+                dead_hit = m
+            if dead_seen >= 2 and not said_dead:
+                log("  this ad looks like one that couldn't be closed on earlier ads - "
+                    f"one BACK after {no_exit_s}s with nothing to tap, then giving up")
+                said_dead = True
+
         if giveups and not passive and any(n >= 2 for n in answer_used.values()) and gray is not None:
             ranked = [r for r in score_all(gray, giveups) if r[0] >= close_thr]
             if ranked:
@@ -3026,7 +3105,8 @@ def watch_ad(cfg, base, log, home=None):
         # gives no sign either way waits until ad_max_seconds without progress.
         last_try = max(start + wait_s, last_moving, last_act[2] if last_act and last_act[0] != "back" else 0.0)
         badge_pending = stuck and badge_seen and stuck_taps == 0
-        fast = ended and now - last_try >= no_exit_s and not badge_pending
+        known_dead = dead_seen >= 2
+        fast = (ended or known_dead) and now - last_try >= no_exit_s and not badge_pending
         if risky_ok and (quiet >= max_s or fast):
             if check_touch_lock(cfg, log):                 # nothing worked because taps were being swallowed
                 last_lock_check = time.time()
@@ -3045,9 +3125,11 @@ def watch_ad(cfg, base, log, home=None):
                     log(f"  nothing else to tap: trying {k[0]} once, though it opened the store here on earlier ads")
                     tap_button(hit, "close", gray, " - a second chance")
                     continue
-            if back_presses >= (2 if fast and quiet < max_s else 3):
+            if back_presses >= (1 if known_dead else 2 if fast and quiet < max_s else 3):
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)
+                if learn_dead and look_thumb(gray) is not None:
+                    dead_look_record(look_thumb(gray), "gave_up")   # learn how it looks
                 return finish(False, "timeout")
             if back_presses == 0:
                 snapshot("no-close-button", log)   # the ad as it looked with no known close button

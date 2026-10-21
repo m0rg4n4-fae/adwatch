@@ -18,6 +18,7 @@ venv/
 /control/
 /stats.json
 /decoys.json
+/dead_looks.json
 *.json.tmp
 *.json.lock
 
