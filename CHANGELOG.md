@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Progress lines under a video in the middle of the screen (Oct 20)
+- **A video's progress line no longer has to be at the top or bottom edge.** Some ads play a phone-sized video in a black frame with a thin coloured line just under the picture, in the middle of the screen. adwatch didn't see it, took the still-looking picture for an ad that had ended, pressed BACK 39 s into a ~50 s video and gave up, losing the reward (Idle Soap ASMR, Galaxy Note 9). It now also looks for such a line: thin, one strong colour from the left edge, a plain track after it and a plain edge beside it, and growing from one look to the next. While it grows, the ad counts as playing.
+
 ### Dead-end ads (Oct 19)
 - **New picture type for ads with no way out: `grab GAME LABEL --deadend`** (saved as `templates/common/deadend_N.png`). Some playable ads (a "SurveyPop - answer 5 questions" card on Word Search Explorer) have no close button and ignore BACK; adwatch pressed BACK for ~110 s before giving up, every time. When a dead-end picture is seen on 2 looks in a row after the minimum wait, adwatch now says "this ad is a known dead end", saves the screen and gives up on it straight away (the ad loop, or a bot using adwatch, then restarts the game). Works in watch mode too.
 

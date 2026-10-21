@@ -531,6 +531,8 @@ def progress_bar(frame, edge="bottom"):
     text and buttons don't count. A bar only means "still playing" when its length changes."""
     if frame is None or frame.ndim != 3:
         return None
+    if edge == "middle":
+        return _middle_bar(frame)
     h, w = frame.shape[:2]
     band = frame[int(h * 0.94):] if edge == "bottom" else frame[:int(h * 0.06)][::-1]
     hsv = cv2.cvtColor(np.ascontiguousarray(band), cv2.COLOR_BGR2HSV)
@@ -550,6 +552,55 @@ def progress_bar(frame, edge="bottom"):
             hue = hsv[i, :a, 0].astype(np.float32)
             if hue.std() < 12:
                 best = max(best, min(a, b) / w)
+    return best or None
+
+
+def _middle_bar(frame):
+    """A thin progress line under a video that doesn't fill the screen (a phone-sized video in a
+    black frame, with its line just below the picture): a band of 2 to ~0.7% of the screen height
+    rows, solidly one colour from the left edge, the same length in every row, with nothing like
+    it in the rows just above and below. It must look like a player's line, not a coloured stripe
+    in the video: the rest of the row (the track still to play) plain and uncoloured, and a plain
+    edge right above or below it (the black frame around the video, or a flat strip).
+    Length 0-1 of the screen width, or None."""
+    h, w = frame.shape[:2]
+    y0, y1 = int(h * 0.06), int(h * 0.94)
+    hsv = cv2.cvtColor(np.ascontiguousarray(frame[y0:y1]), cv2.COLOR_BGR2HSV)
+    colored = (hsv[..., 1] > 70) & (hsv[..., 2] > 80)
+    edge_px = max(1, int(w * 0.03))
+    lengths = np.zeros(len(colored), int)
+    for i in np.flatnonzero(colored[:, :edge_px].any(1) & (colored.mean(1) > 0.08)):
+        row = colored[i]
+        start = int(np.argmax(row))
+        off = np.flatnonzero(~row[start:])
+        lengths[i] = (off[0] if off.size else w - start) + start
+    thick_max = max(3, int(h * 0.007))
+    best, i = 0.0, 0
+    while i < len(lengths):
+        a = lengths[i]
+        if a <= w * 0.08:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(lengths) and abs(lengths[j + 1] - a) <= w * 0.005:
+            j += 1
+        rows = j - i + 1
+        above = lengths[max(0, i - 3):i]
+        below = lengths[j + 1:j + 4]
+        lone = (not above.size or above.max() < a * 0.5) and (not below.size or below.max() < a * 0.5)
+        if 2 <= rows <= thick_max and lone:
+            hue = hsv[i:j + 1, :a, 0].astype(np.float32)
+            v = hsv[..., 2]
+            rest = slice(min(w, a + max(2, int(w * 0.01))), w)
+            track = (a >= w * 0.97 or (not colored[i:j + 1, rest].any()
+                                       and v[i:j + 1, rest].astype(np.float32).std() < 25))
+            near = [k for k in (i - 3, j + 3) if 0 <= k < len(v)]
+            flat = any(v[k].astype(np.float32).std() < 12 and not colored[k].any() for k in near)
+            band = hsv[i:j + 1, :a]
+            solid = band[..., 1].mean() >= 120 and band[..., 2].astype(np.float32).std() < 20
+            if hue.std() < 12 and solid and track and flat:
+                best = max(best, a / w)
+        i = j + 1
     return best or None
 
 
@@ -2612,15 +2663,17 @@ def watch_ad(cfg, base, log, home=None):
 
         # ---- is the ad still playing? ------------------------------------------------------
         seen_bars, moving_bar = {}, None
-        for edge in ("bottom", "top"):                  # each edge on its own: a still strip at one
-            frac = progress_bar(LAST_FRAME, edge)      # mustn't hide a moving bar at the other
+        for edge in ("bottom", "top", "middle"):        # each place on its own: a still strip at one
+            frac = progress_bar(LAST_FRAME, edge)      # mustn't hide a moving bar at another
             if frac is None:
                 continue
             seen_bars[edge] = frac
             hist = [(t, f) for t, f in bar_hist.get(edge, []) if now - t < 8] + [(now, frac)]
             bar_hist[edge] = hist
             fs = [f for _, f in hist]
-            if len(fs) >= 2 and max(fs) - min(fs) >= 0.004 and frac < 0.995:
+            # A line mid-screen has to grow (a video's progress), not just change length.
+            grows = edge != "middle" or (fs == sorted(fs) and fs[-1] - fs[0] >= 0.004)
+            if len(fs) >= 2 and max(fs) - min(fs) >= 0.004 and frac < 0.995 and grows:
                 last_moving = now
                 bar_seen_moving = True
                 moving_bar = frac
