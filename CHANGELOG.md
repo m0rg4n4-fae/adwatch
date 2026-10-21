@@ -162,8 +162,8 @@ Worked out from 16 ads that beat adwatch on Oct 9 and logs from a bot that uses 
 - A failed UI-tree read no longer reuses the previous screen's buttons.
 - A failed screenshot while writing the log no longer stops the run.
 
-### Also in your local copy (not yet in the README or the tests)
-These are in `adwatch/cli.py` on your computer but weren't part of the changes listed above. All of them except the chooser fix are off unless a profile turns them on:
+### Settings for scripts that use adwatch as a library
+Mostly for other programs that call `watch_ad` themselves. All of them except the chooser fix are off unless a profile turns them on:
 - **"Open with" chooser.** When an ad's store link brings up Android's "Open with" sheet on a phone with more than one store, it now counts as leaving the game.
 - **`bar_close_fraction`** (0.75). In the ad loop, close pictures and labelled buttons aren't tapped until a moving progress bar has passed this point.
 - **`still_before_close`** (3 seconds). Now only used to decide that a video has ended. It no longer holds back close buttons, and `still_give_up_seconds` is no longer used.
@@ -183,16 +183,16 @@ These are in `adwatch/cli.py` on your computer but weren't part of the changes l
 | `press_ms` | 120 | how long a wake press is held |
 | `ui_check_seconds` | 6 | how often the UI tree is read for labelled buttons |
 | `popup_templates`, `dismiss_tap` | | ad pop-ups to tap away, and where to tap |
-| `bar_close_fraction` | 0.75 | local copy: see above |
+| `bar_close_fraction` | 0.75 | see above |
 | `still_before_close` | 3 | seconds without video motion that mean an ad has ended |
 | `no_exit_seconds` | 20 | an ad that has ended and shows nothing to tap gets Back after this long |
 | `skip_after_seconds` | 2 | skip buttons are tapped from this many seconds in |
 | `misc_buttons` | | the game's own pop-ups and what to do with each (set by `grab --misc`) |
 | `misc_check_seconds`, `misc_max_per_minute` | 5, 8 | watch mode: how often to check for them; most dealt with a minute |
 | `near_miss_looks` | 3 | looks in a row a near-miss must sit in the same spot before it is tapped |
-| `finished_min_seconds` | | local copy: see above |
-| `answer_templates`, `max_answer_taps` | , 12 | local copy: see above |
-| `skip_templates` | | local copy: see above |
+| `finished_min_seconds` | | see above |
+| `answer_templates`, `max_answer_taps` | , 12 | see above |
+| `skip_templates` | | see above |
 
 ### New commands and flags
 - Commands: `keepalive`, `tidy`, `stats`.
