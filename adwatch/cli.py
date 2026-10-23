@@ -2017,6 +2017,33 @@ def is_launcher(pkg):
     return bool(pkg) and ("launcher" in pkg or pkg.endswith(".home"))
 
 
+# Where an ad's click-through can land. BACK leads back from a store page or a web page; in any
+# other installed app (an ad for a game that is already installed opens that game) BACK goes to
+# that app's own screens (a "Quit the game?" box...), so the game is opened again instead.
+STORE_RE = re.compile(r"vending|samsungapps|amazon\.venezia|appmarket|appgallery|\.market\b|appstore|store", re.I)
+WEB_RE = re.compile(r"chrome|browser|firefox|opera|brave|duckduckgo|emmx|vivaldi|kiwi|webview|customtab"
+                    r"|googlequicksearchbox|\.web\b|\.webbrowser", re.I)
+
+
+def other_app(fg, act=""):
+    """True when the app in front is an ordinary installed app: not a store, a browser / web
+    view, the home screen or Android's own screens."""
+    return bool(fg) and not (STORE_RE.search(fg) or WEB_RE.search(fg) or WEB_RE.search(act or "")
+                             or is_launcher(fg) or fg in IGNORED_FOREGROUND or app_chooser(fg, act))
+
+
+def reopen_game(pkg, log):
+    """Bring the game back to the front by opening it (its task, ad and all), without BACK."""
+    for _ in range(2):
+        launch(pkg)
+        nap(3)
+        fg, act = focus()
+        if fg == pkg or foreign_ad(fg, act):
+            log("  the game is back in front")
+            return True
+    return False
+
+
 def return_to_game(pkg, log, max_presses=5):
     """Press BACK (as many times as it takes) until the game is in front again.
     Only relaunches the game if BACK dumped us on the home screen."""
@@ -2411,6 +2438,7 @@ def watch_ad(cfg, base, log, home=None):
     no_exit_s = cfg.get("no_exit_seconds", 20)         # an ad that has ended and offers nothing for this long: BACK
     near_looks = cfg.get("near_miss_looks", 3)
     max_trips = cfg.get("max_store_trips", 5)
+    app_trips = 0                     # trips into another installed app (not a store / browser)
     poll = cfg.get("poll_seconds", 0.5 if FEED is not None else 1)
     use_ui = cfg.get("ui_fallback", True)
     ui_every = cfg.get("ui_check_seconds", 6)   # the UI-tree dump takes seconds: don't run it every loop
@@ -2692,10 +2720,17 @@ def watch_ad(cfg, base, log, home=None):
                     last_badge = time.time()
             how = {"wake": "the wake press", "ui": "a labelled button", "close": "a close picture", "skip": "a skip button",
                    "popup": "the tap beside a pop-up", "badge": "the store badge"}.get(cause[0]) if cause else None
-            log(f"  left the game ({fg}){' after ' + how if how else ''}, pressing BACK to return")
+            app = other_app(fg, act)
+            if app:
+                app_trips += 1
+                log(f"  left the game: the ad opened another app ({fg}){' after ' + how if how else ''} - "
+                    "opening the game again (BACK would go to that app)")
+            else:
+                log(f"  left the game ({fg}){' after ' + how if how else ''}, pressing BACK to return")
             if cause and cause[0] != "badge":
                 blame(cause[0], cause[1], cause[3])
-            return_to_game(pkg, log, cfg.get("max_back_presses", 5))
+            if not (app and reopen_game(pkg, log)):
+                return_to_game(pkg, log, cfg.get("max_back_presses", 5))
             near_seen.clear()
             # Some ads only show their way out after the badge's own trip: after any other trip,
             # a badge that is showing is pressed straight away (no waiting for stuck_seconds).
@@ -2703,6 +2738,10 @@ def watch_ad(cfg, base, log, home=None):
             closed_once = False  # back on the same ad: what was tapped didn't close it
             min_s = 0  # the ad was clicked through; look for its X right away
             last_act = ("returned", "", time.time(), None)    # (counts as activity for the give-up clock)
+            if app and app_trips >= cfg.get("max_app_trips", 2):
+                log(f"  the ad opened another app {app_trips} times - giving up on it")
+                snapshot("store-loop", log)
+                return finish(False, "store-loop")
             if store_trips >= max_trips:
                 log(f"  {store_trips} trips to the store and the ad still isn't done - giving up on it")
                 snapshot("store-loop", log)

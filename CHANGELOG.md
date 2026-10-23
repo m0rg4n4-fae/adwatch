@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Ads that open another installed app (Oct 22)
+- **When an ad opens another app that's installed on the phone, adwatch opens the game again instead of pressing BACK.** An ad for a game you already have opens that game instead of the Play Store. BACK then works inside that game (bringing up its "Do you want to quit?" box, for example) and never gets back to yours; adwatch pressed BACK 5 times per trip and gave up after 5 trips, ~100 s each time. Now, when the app in front is an ordinary app (not a store, a browser or the home screen), adwatch says "the ad opened another app", brings the game back by opening it, and gives up after 2 such trips (`max_app_trips`). Stores and web pages still get BACK as before.
+
 ### Watch mode on its own: restart the game when an ad is stuck (Oct 21)
 - **`adwatch watch GAME --restart-stuck`** (or `"watch_restart_stuck": true` in a profile) is for leaving watch mode running unattended, e.g. overnight under `keepalive`. When an ad can't be closed, watch mode used to say "close it by hand" and wait, so one stuck ad stalled the game until someone came back. With this flag the game is force-stopped and reopened (like the ad loop does) and watching carries on, at most `max_restarts` (5) times in any hour; past that it leaves the ad for you as before. Off by default, because in watch mode you may be playing.
 
