@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### "Which app is in front" no longer fooled by a frozen app's old window list (Oct 24)
+- **adwatch could believe the Play Store was in front for hours when it wasn't.** Android's window report starts with a saved copy of the windows from the last time an app froze. On a Galaxy Note 9 that copy still showed an invisible Play Store screen, and adwatch read it first: every ad "left the game for the store", BACK did nothing, and it gave up after 5 trips, every 2 minutes for over an hour, while the game was in front all along. adwatch now reads only the live displays (`dumpsys window displays`) and, with several displays, the one whose window has the focus. Phones without that report still use the old one.
+
 ### Ads that open another installed app (Oct 22)
 - **When an ad opens another app that's installed on the phone, adwatch opens the game again instead of pressing BACK.** An ad for a game you already have opens that game instead of the Play Store. BACK then works inside that game (bringing up its "Do you want to quit?" box, for example) and never gets back to yours; adwatch pressed BACK 5 times per trip and gave up after 5 trips, ~100 s each time. Now, when the app in front is an ordinary app (not a store, a browser or the home screen), adwatch says "the ad opened another app", brings the game back by opening it, and gives up after 2 such trips (`max_app_trips`). Stores and web pages still get BACK as before.
 

@@ -800,16 +800,32 @@ def key(name):
 FOCUS_RE = re.compile(r"([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)/([A-Za-z0-9_.$]+)")
 
 
+# Only the live displays: plain `dumpsys window` starts with a saved copy of the windows from the
+# last time an app froze ("LAST ANR"), whose focus may be long gone (a Play Store screen left
+# behind made every look say "the store is in front" for hours).
+FOCUS_CMD = "dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp'"
+FOCUS_CMD_OLD = "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'"     # (phones without "displays")
+
+
+def parse_focus(out):
+    """(package, activity) from mCurrentFocus / mFocusedApp lines, or (None, None). With several
+    displays, the one whose window has the focus wins over another display's left-over app."""
+    lines = (out or "").splitlines()
+    for want in ("mCurrentFocus", "mFocusedApp"):
+        for ln in lines:
+            m = FOCUS_RE.search(ln) if want in ln else None
+            if m:
+                pkg, act = m.group(1), m.group(2)
+                return pkg, (pkg + act if act.startswith(".") else act)   # short form: pkg/.MainActivity
+    return None, None
+
+
 def focus():
     """(package, activity) of what is in front, e.g.
     ('com.some.game', 'com.google.android.gms.ads.AdActivity'). (None, None) if unknown."""
-    out = quick_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'")
-    m = FOCUS_RE.search(out)
-    if not m:
+    pkg, act = parse_focus(quick_shell(FOCUS_CMD) or quick_shell(FOCUS_CMD_OLD))
+    if not pkg:
         return None, None
-    pkg, act = m.group(1), m.group(2)
-    if act.startswith("."):          # short form: pkg/.MainActivity
-        act = pkg + act
     dlog(f"focus: {pkg} / {act.rsplit('.', 1)[-1]}")
     return pkg, act
 
@@ -1129,13 +1145,15 @@ def in_use_note(serial):
 
 def front_app(serial):
     """Package in front on the given phone, or None (a quick dumpsys, no fast shell)."""
-    try:
-        out = subprocess.run([ADB, "-s", serial, "shell", "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'"],
-                             capture_output=True, timeout=8).stdout.decode(errors="replace")
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-    m = FOCUS_RE.search(out)
-    return m.group(1) if m else None
+    for cmd in (FOCUS_CMD, FOCUS_CMD_OLD):
+        try:
+            out = subprocess.run([ADB, "-s", serial, "shell", cmd],
+                                 capture_output=True, timeout=8).stdout.decode(errors="replace")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+        if out.strip():
+            return parse_focus(out)[0]
+    return None
 
 
 def use_phone_with_game(pkg, log=print):
