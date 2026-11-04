@@ -1,6 +1,7 @@
 # Starter set
 
-Ad close buttons (`close_*.png`) and store badges (`stuck_*.png`) that ship with adwatch.
+Ad close buttons (`close_*.png`), store badges (`stuck_*.png`), skip buttons (`skip_*.png`) and
+"back to the game" buttons (`resume_*.png`) that ship with adwatch.
 On first run they are copied into each user's shared pool, so a new user doesn't start
 from zero. Every picture needs its `.png.json` file next to it (the screen size it was
 captured on), which is how it gets rescaled for other phones.

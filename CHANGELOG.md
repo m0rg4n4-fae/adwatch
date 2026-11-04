@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### More skip buttons in the starter set (Nov 4)
+- **Six skip buttons added to the pictures that ship with adwatch**, so a fresh install taps them too: a white ">>" on black, two ">>|" fast-forward buttons, a "▶| Next" pill (a "Get paid to play" ad that had no X), and a grey ">>" circle at the top right, which is also found when half of it is cut off by the top of the screen. Before, an installed adwatch sat on those ads until it gave up. Existing users get them automatically on the next start (only new pictures are added; ones you deleted stay deleted).
+
 ### Hand adwatch your own connection to the phone (Nov 3)
 - **Scripts that import adwatch can lend it their own phone connection:** `watch_ad(..., device=my_phone)` for one ad, or `use_device(my_phone)` for everything. adwatch then takes screenshots, taps, presses keys and opens or closes the game through that object instead of adb. It needs `screenshot()`, `tap()` and `swipe()`; `key()`, `foreground_activity()`, `start_app()`, `stop_app()`, `shell()`, `size` and `serial` are used when there. Without it, nothing changes: adb as before. This is the first step towards iPhones (no adb there): adwatch can already tap an iPhone ad's close button through such a connection and knows the iPhone has no BACK key, but can't yet tell when the game is back.
 
