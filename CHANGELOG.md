@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Hand adwatch your own connection to the phone (Nov 3)
+- **Scripts that import adwatch can lend it their own phone connection:** `watch_ad(..., device=my_phone)` for one ad, or `use_device(my_phone)` for everything. adwatch then takes screenshots, taps, presses keys and opens or closes the game through that object instead of adb. It needs `screenshot()`, `tap()` and `swipe()`; `key()`, `foreground_activity()`, `start_app()`, `stop_app()`, `shell()`, `size` and `serial` are used when there. Without it, nothing changes: adb as before. This is the first step towards iPhones (no adb there): adwatch can already tap an iPhone ad's close button through such a connection and knows the iPhone has no BACK key, but can't yet tell when the game is back.
+
 ### "Which app is in front" no longer fooled by a frozen app's old window list (Oct 24)
 - **adwatch could believe the Play Store was in front for hours when it wasn't.** Android's window report starts with a saved copy of the windows from the last time an app froze. On a Galaxy Note 9 that copy still showed an invisible Play Store screen, and adwatch read it first: every ad "left the game for the store", BACK did nothing, and it gave up after 5 trips, every 2 minutes for over an hour, while the game was in front all along. adwatch now reads only the live displays (`dumpsys window displays`) and, with several displays, the one whose window has the focus. Phones without that report still use the old one.
 

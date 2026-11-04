@@ -111,8 +111,8 @@ def phone_tag():
         return ""
     if _TAG["serial"] != SERIAL:
         _TAG["serial"] = SERIAL
-        try:
-            _TAG["tag"] = f"[{SERIAL[-4:]}] " if len(list_devices()) > 1 else ""
+        try:   # (a phone lent by a program: always tagged - adb can't count it)
+            _TAG["tag"] = f"[{SERIAL[-4:]}] " if DEVICE is not None or len(list_devices()) > 1 else ""
         except Exception:
             _TAG["tag"] = ""
     return _TAG["tag"]
@@ -291,6 +291,13 @@ def adb(*args, binary=False, timeout=30):
 
 
 def shell(cmd, **kw):
+    if DEVICE is not None:          # a device without a shell (an iPhone): Android commands answer nothing
+        sh = getattr(DEVICE, "shell", None)
+        try:
+            return (sh(cmd) or "") if sh else ""
+        except Exception as e:
+            dlog(f"device shell {cmd[:40]}: {e}")
+            return ""
     return adb("shell", cmd, **kw)
 
 
@@ -370,6 +377,32 @@ RAW_FAILS_BEFORE_PNG = 3     # one unreadable raw shot (the screen turning mid-c
 # and returns True if it did it. Either falling through, or raising, uses adb as usual.
 CAPTURE_HOOK = None
 INPUT_HOOK = None
+
+# ---------------------------------------------------------------- the phone itself
+# Everything adwatch does to the phone goes through the few functions below (screenshot, tap,
+# press, swipe, key, focus, launch, stop_app, shell). By default they use adb. A program that
+# already holds a connection to its phone can hand adwatch that instead (use_device(dev), or
+# watch_ad(..., device=dev)); then nothing goes through adb. A device needs:
+#   screenshot() -> BGR picture        tap(x, y, hold=seconds)        swipe(x0, y0, x1, y1, ms=...)
+# and may have (each one missing just switches off what needs it):
+#   key(name)          "BACK", "HOME", "WAKEUP"... (Android's KEYCODE_ names without the prefix);
+#                      raising ValueError / NotImplementedError = this phone has no such key
+#   foreground_activity() -> "package/Activity" or None (what is in front)
+#   start_app(pkg), stop_app(pkg)      shell(cmd) -> str (an Android shell command's output)
+#   size (width, height), serial, platform ("android" / "ios"), label (for the statistics)
+DEVICE = None
+
+
+def use_device(dev):
+    """Send everything adwatch does to the phone through `dev` (None: back to adb)."""
+    global DEVICE, SERIAL
+    DEVICE = dev
+    if dev is not None and getattr(dev, "serial", None):
+        SERIAL = str(dev.serial)
+
+
+def device_platform():
+    return getattr(DEVICE, "platform", "android") if DEVICE is not None else "android"
 
 
 def _grab_png():
@@ -453,6 +486,14 @@ def open_feed(device, log=print):
 def screenshot():
     global FEED
     t0 = time.time()
+    if DEVICE is not None:
+        for _ in range(3):
+            f = DEVICE.screenshot()
+            if f is not None and getattr(f, "size", 0):
+                dlog(f"screen: device {f.shape[1]}x{f.shape[0]} in {(time.time() - t0) * 1000:.0f} ms")
+                return f
+            time.sleep(0.5)
+        raise RuntimeError("no picture from the phone")
     if CAPTURE_HOOK is not None:
         try:
             f = CAPTURE_HOOK()
@@ -667,6 +708,9 @@ _FAST = {"obj": None, "failed": False}
 
 def input_cmd(args):
     """Send `input <args>` to the phone - through the fast shell when possible."""
+    if DEVICE is not None:
+        _device_input(args)
+        return
     if INPUT_HOOK is not None:
         try:
             t0 = time.time()
@@ -692,9 +736,50 @@ def input_cmd(args):
     shell(f"input {args}")
 
 
+def _device_input(args):
+    """An `input ...` command (tap / swipe / keyevent) done by the device instead of adb."""
+    a = args.split()
+    try:
+        if a[0] == "tap":
+            DEVICE.tap(int(a[1]), int(a[2]))
+        elif a[0] == "swipe" and a[1:3] == a[3:5]:        # a press held in place
+            DEVICE.tap(int(a[1]), int(a[2]), hold=int(a[5]) / 1000 if len(a) > 5 else 0.1)
+        elif a[0] == "swipe":
+            DEVICE.swipe(int(a[1]), int(a[2]), int(a[3]), int(a[4]), ms=int(a[5]) if len(a) > 5 else 300)
+        elif a[0] == "keyevent":
+            device_key(a[1])
+        else:
+            dlog(f"input {args}: not something this phone can do - skipped")
+            return
+        dlog(f"input {args} (device)")
+    except (IndexError, ValueError) as e:
+        dlog(f"input {args}: {e}")
+
+
+_NO_KEY_SAID = set()
+
+
+def device_key(name):
+    """Press a key on the device; False if it has no such key (an iPhone has no BACK)."""
+    short = name[len("KEYCODE_"):] if name.startswith("KEYCODE_") else name
+    k = getattr(DEVICE, "key", None)
+    try:
+        if k is None:
+            raise NotImplementedError
+        k(short)
+        return True
+    except (ValueError, NotImplementedError):
+        if short not in _NO_KEY_SAID:
+            _NO_KEY_SAID.add(short)
+            dlog(f"this phone has no {short} key - skipped")
+        return False
+
+
 def quick_shell(command):
     """Run a short command on the phone through the open fast-input shell (no new adb process,
     about half the time); falls back to a normal adb shell call."""
+    if DEVICE is not None:
+        return shell(command)
     if FAST_INPUT and not _FAST["failed"]:
         try:
             if _FAST["obj"] is None:
@@ -783,6 +868,11 @@ def screen_size():
     if LAST_FRAME is not None and time.time() - _FRAME_T[0] < 5:
         h, w = LAST_FRAME.shape[:2]
         return w, h
+    if DEVICE is not None:
+        if getattr(DEVICE, "size", None):
+            return tuple(map(int, DEVICE.size))
+        h, w = screenshot().shape[:2]
+        return w, h
     nums = re.findall(r"(\d+)x(\d+)", shell("wm size"))
     if not nums:
         h, w = screenshot().shape[:2]
@@ -791,10 +881,16 @@ def screen_size():
 
 
 def key(name):
+    """Press a key (KEYCODE_BACK...). False if the phone has no such key (an iPhone has no BACK)."""
     global LAST_ACTION
     dlog(f"KEY {name}")
-    input_cmd(f"keyevent {name}")
+    if DEVICE is not None:
+        ok = device_key(name)
+    else:
+        input_cmd(f"keyevent {name}")
+        ok = True
     LAST_ACTION = time.time()
+    return ok
 
 
 FOCUS_RE = re.compile(r"([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)/([A-Za-z0-9_.$]+)")
@@ -823,7 +919,12 @@ def parse_focus(out):
 def focus():
     """(package, activity) of what is in front, e.g.
     ('com.some.game', 'com.google.android.gms.ads.AdActivity'). (None, None) if unknown."""
-    pkg, act = parse_focus(quick_shell(FOCUS_CMD) or quick_shell(FOCUS_CMD_OLD))
+    if DEVICE is not None:
+        fa = getattr(DEVICE, "foreground_activity", None)
+        a = fa() if fa else None             # (an iPhone can't tell: None)
+        pkg, act = parse_focus(f"mCurrentFocus=Window{{x {a}}}") if a and "/" in a else (None, None)
+    else:
+        pkg, act = parse_focus(quick_shell(FOCUS_CMD) or quick_shell(FOCUS_CMD_OLD))
     if not pkg:
         return None, None
     dlog(f"focus: {pkg} / {act.rsplit('.', 1)[-1]}")
@@ -879,7 +980,19 @@ def is_ad_activity(activity, extra=()):
 
 
 def launch(pkg):
+    """Bring the game to the front (start it if it isn't running)."""
+    if DEVICE is not None and hasattr(DEVICE, "start_app"):
+        DEVICE.start_app(pkg)
+        return
     shell(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
+
+
+def stop_app(pkg):
+    """Close the game completely (Android's force-stop)."""
+    if DEVICE is not None and hasattr(DEVICE, "stop_app"):
+        DEVICE.stop_app(pkg)
+        return
+    shell(f"am force-stop {pkg}")
 
 
 def nap(seconds, spread=0.25):
@@ -1808,6 +1921,8 @@ _PHONE_NAME = {}
 def phone_label():
     """'Pixel 9 Pro XL (R58M123ABCD)' - for the statistics."""
     key = SERIAL or "default"
+    if DEVICE is not None and getattr(DEVICE, "label", None):
+        return str(DEVICE.label)
     if key not in _PHONE_NAME:
         try:
             model = shell("getprop ro.product.model").strip()
@@ -2014,7 +2129,7 @@ def check_touch_lock(cfg, log):
 def restart_game(pkg, log, wait=15):
     """Force-stop the game and open it again - the way out of an ad that won't let go."""
     log("  restarting the game to get out of it")
-    shell(f"am force-stop {pkg}")
+    stop_app(pkg)
     nap(2, 0)
     launch(pkg)
     nap(wait, 0.1)
@@ -2399,7 +2514,21 @@ DECOYS = {"ui": {}, "close": {}, "wake": {}, "close_ok": {}}   # "picture@spot" 
 LAST_AD_END = {"why": None}        # why the last watch_ad gave up: "timeout" or "store-loop"
 
 
-def watch_ad(cfg, base, log, home=None):
+def watch_ad(cfg, base, log, home=None, device=None):
+    """Get one ad closed (see _watch_ad). device: the program's own connection to the phone, used
+    for this ad instead of adb (see use_device); None keeps whatever is set already."""
+    global DEVICE, SERIAL
+    if device is None:
+        return _watch_ad(cfg, base, log, home)
+    before = (DEVICE, SERIAL)
+    use_device(device)
+    try:
+        return _watch_ad(cfg, base, log, home)
+    finally:
+        DEVICE, SERIAL = before
+
+
+def _watch_ad(cfg, base, log, home=None):
     """Get one ad closed. Active mode (home=None): returns True/False, and "the ad is over"
     means a game marker image is visible again (or the screen is the game's from before the ad).
     Passive mode (home = set of the game's own activities, from the watch command): the ad is

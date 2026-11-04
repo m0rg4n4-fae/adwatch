@@ -193,6 +193,16 @@ claim.truncate(0); json.dump({"owner": "mybot", "pid": os.getpid(), "since": tim
 
 A script that imports adwatch can call `adwatch.cli.claim_phone(serial, "mybot")` instead (it returns the holder's details if the phone is taken, or None). Claims work on Linux and macOS; on Windows they're skipped.
 
+**Using your own connection to the phone.** A script that already talks to its phone some other way can hand adwatch that connection, and adwatch then does everything through it instead of adb (screenshots, taps, keys, opening and closing the game):
+
+```python
+import adwatch.cli as aw
+result = aw.watch_ad(cfg, base, log, home=home, device=my_phone)   # just for this ad
+aw.use_device(my_phone)                                             # or for everything from now on (None = adb again)
+```
+
+`my_phone` needs `screenshot()` (a BGR picture), `tap(x, y, hold=seconds)` and `swipe(x0, y0, x1, y1, ms=...)`. It may also have `key(name)` (`"BACK"`, `"HOME"`...; raise `ValueError` for a key it doesn't have), `foreground_activity()` (`"package/Activity"` of what's in front), `start_app(pkg)`, `stop_app(pkg)`, `shell(cmd)`, `size`, `serial` and `platform`. Whatever it lacks is simply not used. (This is groundwork for iPhones: adwatch's ad handling itself still assumes Android, so on an iPhone it can tap close buttons but can't yet tell when the game is back.)
+
 </details>
 
 <details>
