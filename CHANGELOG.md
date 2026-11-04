@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Ads on iPhones (Nov 4)
+- **adwatch can now handle ads on a phone that can't say which app is in front and has no BACK key**, like an iPhone driven through a script's own connection (`watch_ad(..., device=my_phone)`). A script can pass its own "is this my game?" check (`in_game=`), and adwatch stops the moment it says yes; without one it uses the game's pictures, or stops right after a tap that changes the screen, so it never taps around inside the game. A tap that opens a web page is noticed from a picture of the browser (new picture type: `away_*.png`), blamed like a store-opening tap on Android, and the game is brought back with the connection's `activate()`. If the game was closed by the ad it's opened again. Where Android would press BACK, the ad is given up on straight away. Android phones work exactly as before.
+
 ### More skip buttons in the starter set (Nov 4)
 - **Six skip buttons added to the pictures that ship with adwatch**, so a fresh install taps them too: a white ">>" on black, two ">>|" fast-forward buttons, a "▶| Next" pill (a "Get paid to play" ad that had no X), and a grey ">>" circle at the top right, which is also found when half of it is cut off by the top of the screen. Before, an installed adwatch sat on those ads until it gave up. Existing users get them automatically on the next start (only new pictures are added; ones you deleted stay deleted).
 

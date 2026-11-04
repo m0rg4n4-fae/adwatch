@@ -390,6 +390,11 @@ INPUT_HOOK = None
 #   foreground_activity() -> "package/Activity" or None (what is in front)
 #   start_app(pkg), stop_app(pkg)      shell(cmd) -> str (an Android shell command's output)
 #   size (width, height), serial, platform ("android" / "ios"), label (for the statistics)
+#   running(pkg) -> bool               the app's process is alive (in front or not)
+#   activate(pkg)                      bring a running app to the front WITHOUT restarting it
+#   has_back (bool)                    whether key("BACK") exists (default: not on "ios")
+# A phone without foreground_activity() (an iPhone) can't say which app is in front; see
+# can_tell_front() for what adwatch does instead.
 DEVICE = None
 
 
@@ -403,6 +408,48 @@ def use_device(dev):
 
 def device_platform():
     return getattr(DEVICE, "platform", "android") if DEVICE is not None else "android"
+
+
+def can_tell_front():
+    """Whether the phone can say which app is in front. An iPhone can't: there adwatch knows
+    the game is back from the caller's in_game check or the game's own pictures, and that the
+    ad took the phone somewhere else from pictures of those places (away_*.png)."""
+    return DEVICE is None or callable(getattr(DEVICE, "foreground_activity", None))
+
+
+def has_back():
+    """Whether the phone has a BACK key (an iPhone doesn't)."""
+    if DEVICE is None:
+        return True
+    have = getattr(DEVICE, "has_back", None)
+    if have is not None:
+        return bool(have)
+    return callable(getattr(DEVICE, "key", None)) and device_platform() != "ios"
+
+
+def game_running(pkg):
+    """True / False when the phone can say whether the game's process is alive, else None."""
+    r = getattr(DEVICE, "running", None) if DEVICE is not None else None
+    if not callable(r):
+        return None
+    try:
+        return bool(r(pkg))
+    except Exception as e:
+        dlog(f"running({pkg}): {e!r}")
+        return None
+
+
+def activate(pkg):
+    """Bring the running game to the front without restarting it; False if the phone can't."""
+    a = getattr(DEVICE, "activate", None) if DEVICE is not None else None
+    if not callable(a):
+        return False
+    try:
+        a(pkg)
+        return True
+    except Exception as e:
+        dlog(f"activate({pkg}): {e!r}")
+        return False
 
 
 def _grab_png():
@@ -2514,21 +2561,24 @@ DECOYS = {"ui": {}, "close": {}, "wake": {}, "close_ok": {}}   # "picture@spot" 
 LAST_AD_END = {"why": None}        # why the last watch_ad gave up: "timeout" or "store-loop"
 
 
-def watch_ad(cfg, base, log, home=None, device=None):
+def watch_ad(cfg, base, log, home=None, device=None, in_game=None):
     """Get one ad closed (see _watch_ad). device: the program's own connection to the phone, used
-    for this ad instead of adb (see use_device); None keeps whatever is set already."""
+    for this ad instead of adb (see use_device); None keeps whatever is set already.
+    in_game: the program's own check, in_game(frame) -> True when the BGR screenshot is the
+    game's (not the ad's); checked on every look before anything is tapped. On a phone that
+    can't say which app is in front (an iPhone) it is the best way to know the ad is over."""
     global DEVICE, SERIAL
     if device is None:
-        return _watch_ad(cfg, base, log, home)
+        return _watch_ad(cfg, base, log, home, in_game)
     before = (DEVICE, SERIAL)
     use_device(device)
     try:
-        return _watch_ad(cfg, base, log, home)
+        return _watch_ad(cfg, base, log, home, in_game)
     finally:
         DEVICE, SERIAL = before
 
 
-def _watch_ad(cfg, base, log, home=None):
+def _watch_ad(cfg, base, log, home=None, in_game=None):
     """Get one ad closed. Active mode (home=None): returns True/False, and "the ad is over"
     means a game marker image is visible again (or the screen is the game's from before the ad).
     Passive mode (home = set of the game's own activities, from the watch command): the ad is
@@ -2563,7 +2613,13 @@ def _watch_ad(cfg, base, log, home=None):
     skips = unique_files(with_common([], base, "skip_*.png") + [p for p in all_close if os.path.basename(p) in skip_names])
     skip_digests = {_digest(p) for p in skips}
     close = [p for p in all_close if _digest(p) not in skip_digests]
-    back_in_game = [] if passive else game_markers(cfg, base)
+    # A phone that can't say which app is in front (an iPhone) is "blind": the game's return is
+    # known from in_game / the game's pictures (in watch mode too), and a trip out of the game
+    # from pictures of where the ad went (away_*.png: a browser, the App Store, the home screen).
+    blind = not can_tell_front()
+    back_in_game = [] if passive and not blind else game_markers(cfg, base)
+    aways = with_common(cfg.get("away_templates", []), base, "away_*.png") if blind else []
+    can_back = has_back()
     has_misc = bool(cfg.get("misc_buttons"))
     game_frame = None
     if not passive:
@@ -2648,6 +2704,11 @@ def _watch_ad(cfg, base, log, home=None):
     reward_hold = 0.0
     back_presses, fast_backs = 0, 0
     closed_once = False
+    # Blind, with nothing to recognise the game by: a tap that changes the screen ends the ad
+    # (adwatch can't tell the game from the ad, so it stops rather than tap on in the game).
+    tap_ends = blind and in_game is None and not back_in_game and game_frame is None
+    tap_changed = False
+    last_alive_check = time.time()
     LAST_AD_END["why"] = None
 
     def decoy_spots():
@@ -2778,7 +2839,7 @@ def _watch_ad(cfg, base, log, home=None):
         return hit
 
     def tap_button(hit, kind, gray, note=""):
-        nonlocal closed_once, guard_until
+        nonlocal closed_once, guard_until, tap_changed
         H, W = (gray.shape[:2] if gray is not None else screen_size()[::-1])
         # The same place tapped again and again with the ad still there (an "are you sure?" box over it,
         # say): set it aside and let the other ways out have a go. Counted per place, whichever saved
@@ -2801,6 +2862,41 @@ def _watch_ad(cfg, base, log, home=None):
         closed_once = True
         near_seen.clear()
         nap(2)
+        if tap_ends and gray is not None and not same_screen(gray_screen(), gray, 0.8):
+            tap_changed = True
+
+    def back_result():
+        """What "the game is back" returns: True in the ad loop; in watch mode "closed" when
+        adwatch did something, "gone" when the ad went away by itself."""
+        if not passive:
+            return True
+        return "closed" if (closed_once or back_presses or stuck_taps) else "gone"
+
+    def left_to(where):
+        """Blind phones: a picture showed the ad took the phone out of the game (a browser, the
+        App Store...). Blame what was tapped last and bring the game back. True: carry on with
+        the ad; False: the game had to be restarted (the ad is gone with it)."""
+        nonlocal store_trips, closed_once, min_s, last_act, hold_until
+        store_trips += 1
+        cause = last_act if last_act and time.time() - last_act[2] < 10 else None
+        how = {"close": "a close picture", "skip": "a skip button", "popup": "the tap beside a pop-up",
+               "badge": "the store badge", "ui": "a labelled button"}.get(cause[0]) if cause else None
+        log(f"  left the game ({where}){' after ' + how if how else ''} - opening the game again")
+        if cause and cause[0] not in ("badge", "wake", "returned"):
+            blame(cause[0], cause[1], cause[3])
+        near_seen.clear()
+        closed_once = False
+        min_s = 0
+        last_act = ("returned", "", time.time(), None)
+        if activate(pkg):
+            nap(2)
+            if not (cause and cause[0] == "badge"):
+                hold_until = time.time() + min(10 * store_trips, 40)
+            return True
+        log("  this phone can only open the game by restarting it - the ad is gone with it")
+        launch(pkg)
+        nap(5)
+        return False
 
     start = time.time()
     dlog(f"ad: start ({'passive' if passive else 'active'}) close={len(close)} skip={len(skips)} stuck={len(stuck)} "
@@ -2819,6 +2915,18 @@ def _watch_ad(cfg, base, log, home=None):
             log(f"  the ad has run for {elapsed:.0f}s - giving up on it")
             snapshot("hard-timeout", log)
             return finish(False, "timeout")
+
+        if tap_changed:
+            log("  the screen changed after that tap - taking the ad as closed (this phone can't say "
+                "when the game is back, and adwatch wasn't given a way to recognise it)")
+            return finish(back_result())
+        if blind and time.time() - last_alive_check >= cfg.get("alive_check_seconds", 10):
+            last_alive_check = time.time()
+            if game_running(pkg) is False:
+                log("  the game isn't running any more (the ad closed it?) - opening it again")
+                launch(pkg)
+                nap(5)
+                return finish(False, "reopened")
 
         # A close button set aside after taps that didn't work gets another go later: some only start
         # responding a while after they appear.
@@ -2999,11 +3107,20 @@ def _watch_ad(cfg, base, log, home=None):
             dlog(f"ad: looks finished after {elapsed:.0f}s - not waiting out the full {min_s}s")
 
         # ---- the game is back? ---------------------------------------------------------------
+        if in_game is not None and elapsed > 2 and LAST_FRAME is not None:
+            try:
+                back = bool(in_game(LAST_FRAME))
+            except Exception as e:                      # the caller's check failed: not a reason to stop
+                dlog(f"ad: in_game check failed: {e!r}")
+                back = False
+            if back:
+                log(f"  back in game after {elapsed:.0f}s")
+                return finish(back_result())
         if back_in_game and elapsed > 4:
             hit = find(gray, back_in_game, thr, "game-marker")
             if hit:
                 log(f"  back in game after {elapsed:.0f}s")
-                return finish(True)
+                return finish(back_result())
         if not passive and has_misc and elapsed > 4 and clear_misc(cfg, base, log, gray):
             log(f"  back in game after {elapsed:.0f}s (one of its pop-ups was showing)")
             return finish(True)
@@ -3012,6 +3129,19 @@ def _watch_ad(cfg, base, log, home=None):
             if game_looks >= 2:
                 log(f"  back in game after {elapsed:.0f}s (the screen is the game's from before the ad)")
                 return finish(True)
+
+        # ---- blind phones: did the ad take the phone out of the game? ------------------------------
+        if aways and gray is not None:
+            hit = find(gray, aways, thr, "outside the game")
+            if hit:
+                where = os.path.splitext(os.path.basename(hit[3]))[0].replace("away_", "").replace("_", " ")
+                if not left_to(where):
+                    return finish(False, "reopened")
+                if store_trips >= max_trips:
+                    log(f"  {store_trips} trips out of the game and the ad still isn't done - giving up on it")
+                    snapshot("store-loop", log)
+                    return finish(False, "store-loop")
+                continue
 
         # ---- always-safe buttons: skip, "reward granted" ----------------------------------------
         if skips and elapsed >= skip_after:
@@ -3311,6 +3441,12 @@ def _watch_ad(cfg, base, log, home=None):
                     log(f"  nothing else to tap: trying {k[0]} once, though it opened the store here on earlier ads")
                     tap_button(hit, "close", gray, " - a second chance")
                     continue
+            if not can_back:                               # (an iPhone): BACK was the last thing left to try
+                snapshot("no-close-button", log)
+                log("  nothing left to try (this phone has no BACK key) - giving up on this one")
+                if learn_dead and look_thumb(gray) is not None:
+                    dead_look_record(look_thumb(gray), "gave_up")
+                return finish(False, "timeout")
             if back_presses >= (1 if known_dead else 2 if fast and quiet < max_s else 3):
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)
