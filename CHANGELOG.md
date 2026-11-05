@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A "Close" button for "Close | Open" sheets (Nov 5)
+- **The white "Close" pill of the sheet some iPhone ads end on** ("Close" on the left, a blue "Open" on the right) is now a close picture in the starter set. It only ever matches "Close". Before, adwatch had nothing to tap there and gave up.
+
 ### One more skip button (Nov 5)
 - **A white circle with ">|" (skip to the next part) at the top right of an ad's end card** is now in the starter set. Seen on an iPhone ad with no X: adwatch waited 29 s and gave up.
 
