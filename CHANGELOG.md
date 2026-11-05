@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Give up sooner when there's a quicker way out (Nov 5)
+- **New setting `give_up_seconds`** (off by default). When it's set, an ad that sits still with nothing to tap for that many seconds (after the earliest close time) is treated like a finished ad with no way out: BACK, then give up, or straight away on a phone with no BACK key. Before, an ad that didn't look finished waited for `ad_max_seconds`. For scripts that can get out faster another way, like restarting the game.
+
 ### A "Close" button for "Close | Open" sheets (Nov 5)
 - **The white "Close" pill of the sheet some iPhone ads end on** ("Close" on the left, a blue "Open" on the right) is now a close picture in the starter set. It only ever matches "Close". Before, adwatch had nothing to tap there and gave up.
 

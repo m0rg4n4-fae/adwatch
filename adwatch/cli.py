@@ -2639,6 +2639,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     bar_done_min = cfg.get("bar_done_min_seconds", 8)  # earliest close once a progress bar has run to the end
     skip_after = cfg.get("skip_after_seconds", 2)
     no_exit_s = cfg.get("no_exit_seconds", 20)         # an ad that has ended and offers nothing for this long: BACK
+    give_up_s = cfg.get("give_up_seconds")            # set: still and nothing tapped for this long, ended or not: BACK / give up
     near_looks = cfg.get("near_miss_looks", 3)
     max_trips = cfg.get("max_store_trips", 5)
     app_trips = 0                     # trips into another installed app (not a store / browser)
@@ -3418,11 +3419,12 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # ---- nothing to tap: BACK, then give up ------------------------------------------------
         # An ad that has visibly ended and offers nothing for no_exit_seconds gets BACK straight
         # away (twice, then it is given up on - the ad loop then restarts the game); one that
-        # gives no sign either way waits until ad_max_seconds without progress.
+        # gives no sign either way waits until ad_max_seconds without progress (or give_up_seconds, if set).
         last_try = max(start + wait_s, last_moving, last_act[2] if last_act and last_act[0] != "back" else 0.0)
         badge_pending = stuck and badge_seen and stuck_taps == 0
         known_dead = dead_seen >= 2
-        fast = (ended or known_dead) and now - last_try >= no_exit_s and not badge_pending
+        fast = ((ended or known_dead) and now - last_try >= no_exit_s
+                or give_up_s is not None and now - last_try >= give_up_s) and not badge_pending
         if risky_ok and (quiet >= max_s or fast):
             if check_touch_lock(cfg, log):                 # nothing worked because taps were being swallowed
                 last_lock_check = time.time()

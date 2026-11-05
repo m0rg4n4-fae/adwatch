@@ -243,6 +243,7 @@ If the feed can't be opened, or stops, adwatch goes back to adb screenshots by i
 | `max_store_trips` | 5 | give up on an ad after this many trips to the store |
 | `ad_hard_max_seconds` | 240 | give up on an ad after this long, progress bar or not |
 | `no_exit_seconds` | 20 | an ad that has ended and shows nothing to tap gets Back after this long |
+| `give_up_seconds` | (off) | for scripts with a quicker way out (like restarting the game): once the earliest close time has passed, an ad that sits still with nothing to tap for this long gets Back (or, on a phone with no Back key, is given up on), whether or not it looks finished |
 | `skip_after_seconds` | 2 | skip buttons are tapped from this many seconds in |
 | `misc_check_seconds` | 5 | watch mode: how often to look for the game's own pop-ups |
 | `misc_max_per_minute` | 8 | at most this many pop-ups dealt with a minute, so a stubborn one can't keep it busy |
