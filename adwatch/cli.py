@@ -156,7 +156,8 @@ def make_log():
 
 
 def snapshot(reason, log=None):
-    """Save what the phone shows to debug/ when something goes wrong (keeps the newest 40)."""
+    """Save what the phone shows to debug/ when something goes wrong. Keeps the newest 40 per
+    phone (with 2+ phones, so a busy phone doesn't push out another's rare screens) and 120 in all."""
     try:
         dbg = os.path.join(DATA_DIR, "debug")
         os.makedirs(dbg, exist_ok=True)
@@ -165,7 +166,9 @@ def snapshot(reason, log=None):
         if log:
             log(f"  saved the screen to debug/{name}")
         old = sorted(glob.glob(os.path.join(dbg, "2*_*.png")))
-        for p in old[:-40]:
+        tag = re.sub(r"[^a-z0-9]", "", phone_tag().lower())
+        mine = [p for p in old if os.path.basename(p).split("_", 1)[1].startswith(tag + "-")] if tag else old
+        for p in set(mine[:-40]) | set(old[:-120]):
             os.remove(p)
     except (Exception, SystemExit):   # a snapshot must never break the run (adb gone, disk full...)
         pass

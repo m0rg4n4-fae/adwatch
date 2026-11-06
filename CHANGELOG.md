@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Saved screens: 40 per phone (Nov 5)
+- **With several phones, `debug/` now keeps the newest 40 screens per phone (and 120 in all)** instead of 40 overall. A busy phone used to push out another phone's few, rarer screens within hours, before anyone could look at them.
+
 ### Give up sooner when there's a quicker way out (Nov 5)
 - **New setting `give_up_seconds`** (off by default). When it's set, an ad that sits still with nothing to tap for that many seconds (after the earliest close time) is treated like a finished ad with no way out: BACK, then give up, or straight away on a phone with no BACK key. Before, an ad that didn't look finished waited for `ad_max_seconds`. For scripts that can get out faster another way, like restarting the game.
 
