@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A skip button half hidden by a black band (Nov 10)
+- **A grey ">>" circle at the top right whose upper half sinks into the black band above a video** is now in the starter set. The existing ">>" pictures scored just under the bar on it (0.85), so two video ads in a row were waited out for two minutes each and given up on.
+
 ### Saved screens: 40 per phone (Nov 5)
 - **With several phones, `debug/` now keeps the newest 40 screens per phone (and 120 in all)** instead of 40 overall. A busy phone used to push out another phone's few, rarer screens within hours, before anyone could look at them.
 
