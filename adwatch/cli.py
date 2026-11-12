@@ -2852,8 +2852,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             DECOYS["close"][f"{name}@{key[1]}"] = DECOYS["close"].get(f"{name}@{key[1]}", 0) + 1
             if tap_shot and tap_shot[0] is not None:
                 decoy_look_record(f"{name}@{key[1]}", tap_shot[0], tap_shot[1], tap_shot[2])
-            if decoy_try and decoy_try[0] == f"{name}@{key[1]}":
-                decoy_try = None                    # it opened the store again: not forgiven
+            if decoy_try and len(decoy_try) > 2 and decoy_try[0] == f"{name}@{key[1]}":
+                decoy_try = None                    # an old skip decoy opened the store again: not forgiven
+                # (a last-try marker stays set: one last try per ad, not one per remembered decoy)
             save_decoys()
             log(f"  close picture {name} opened the store here - not using it in that spot on this ad")
         elif kind == "popup":
