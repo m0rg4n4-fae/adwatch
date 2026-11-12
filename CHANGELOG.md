@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### An ad's end card no longer ends the ad early on an iPhone (Nov 12)
+- **On a phone that can't say which app is in front (an iPhone), when the program tells adwatch what its game looks like (`in_game`), adwatch no longer guesses that an ad is gone just because nothing is left to tap after its close button.** A video's X often opens an end card (Unity's: black, a white X in a dark box top right) that fades in a moment later; adwatch used to stop on that in-between look and hand the end card back to the program. It now keeps looking until the program's own check says the game is back, and taps the end card's X too. Android phones and programs without `in_game` work as before.
+
 ### Programs that use adwatch now learn from closed ads too (Nov 12)
 - **When a program hands its ads to adwatch (with the game's screens, `home=`), a closed ad now counts for what adwatch learns.** Such an ad ends as "closed" (or "gone"), and three lessons only counted a plain success: forgiving a remembered store-opening spot whose last-try tap closed the ad, counting a close against an ad picture learned as "no way out" (so ads that sometimes close aren't given up on too soon), and remembering near-miss taps that worked. The plain `adwatch` ad loop already learned them.
 

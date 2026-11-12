@@ -3383,7 +3383,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             if hit:
                 tap_button(hit, "close", gray, " drawn on the ad")
                 continue
-            if closed_once and not back_in_game and not passive:
+            # Nothing to tap after a close tap: guessed gone. Not on a phone that can't say which app
+            # is in front when the caller can tell its game: there the next look may be the ad's end
+            # card fading in (a Unity card with its own X), and the caller's in_game says when it's over.
+            if closed_once and not back_in_game and not passive and not (blind and in_game is not None):
                 log(f"  ad dismissed after {elapsed:.0f}s")
                 return finish(True)
 
