@@ -119,7 +119,7 @@ Then open a pull request with the new files. They are small crops of ad close bu
 | From the folder (`python adwatch.py`) | that folder (`profiles/`, `templates/`) |
 | Either, with `ADWATCH_HOME` set | wherever it points |
 
-`templates/common/` is your collection of ad close buttons, skip buttons and store badges. It works on any phone and in any game, so you can copy it to a friend. `stats.json` holds the ad counts and `decoys.json` the spots where a saved button turned out to open the store. `dead_looks.json` holds small pictures of ads that had to be given up on: one that looks the same as an ad given up on twice before gets one BACK and is then given up on right away (`"learn_dead_ends": false` in a profile turns this off).
+`templates/common/` is your collection of ad close buttons, skip buttons and store badges. It works on any phone and in any game, so you can copy it to a friend. `stats.json` holds the ad counts and `decoys.json` the spots where a saved button turned out to open the store (with a small picture of how each looked then, so a real button that later sits in the same place on another ad is still tapped). `dead_looks.json` holds small pictures of ads that had to be given up on: one that looks the same as an ad given up on twice before gets one BACK and is then given up on right away (`"learn_dead_ends": false` in a profile turns this off).
 
 ## Troubleshooting
 

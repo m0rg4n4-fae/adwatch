@@ -1845,8 +1845,74 @@ def _write_json(path, data):
         dlog(f"could not write {os.path.basename(path)}: {e}")
 
 
+DECOY_LOOK_R = 0.05        # a decoy's look: the screen around its tap point, this share of the short side each way
+DECOY_LOOKS_KEPT = 4       # looks kept per picture@spot (a few different ads' buttons can share one corner)
+DECOY_LOOK_LIKE = 0.8      # the screen there now "looks like" a remembered decoy at this score or better
+
+
+def decoy_look(gray, x, y, wider=1.0, size=32):
+    """The grey screen around (x, y) as a small square (size x size), or None: how a decoy looked
+    where it was tapped. wider > 1 takes a little more around it, to find it again a few pixels off."""
+    if gray is None or getattr(gray, "ndim", 0) != 2:
+        return None
+    h, w = gray.shape
+    r = max(6, round(DECOY_LOOK_R * min(w, h) * wider))
+    x, y = int(x), int(y)
+    crop = gray[max(0, y - r):y + r, max(0, x - r):x + r]
+    if crop.shape[0] < r or crop.shape[1] < r:
+        return None
+    return cv2.resize(crop, (size, size), interpolation=cv2.INTER_AREA)
+
+
+def _look_px(rec):
+    try:
+        return np.frombuffer(base64.b64decode(rec["px"]), np.uint8).reshape(32, 32)
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def looks_like_decoy(gray, looks):
+    """Does the screen still look, where a remembered decoy was tapped, the way it did when that tap
+    opened the store? (AppLovin's "Google Play" pill has a skip-like mark; a real skip disc can sit
+    in the same corner of another ad, and must not be refused because of it.)"""
+    h, w = gray.shape
+    for rec in looks:
+        then = _look_px(rec)
+        now = decoy_look(gray, rec.get("x", 0) * w, rec.get("y", 0) * h, wider=1.25, size=40)
+        if then is None or now is None:
+            continue
+        if then.std() < 2 or now.std() < 2:                     # a flat patch only looks like a flat one
+            if then.std() < 2 and now.std() < 2 and abs(float(then.mean()) - float(now.mean())) < 12:
+                return True
+            continue
+        if float(cv2.matchTemplate(now, then, cv2.TM_CCOEFF_NORMED).max()) >= DECOY_LOOK_LIKE:
+            return True
+    return False
+
+
+def decoy_look_record(key, gray, x, y):
+    """Keep how a decoy looked where it opened the store (a few per picture@spot)."""
+    look = decoy_look(gray, x, y)
+    if look is None:
+        return
+    h, w = gray.shape
+    rec = {"x": round(x / w, 4), "y": round(y / h, 4), "px": base64.b64encode(look.tobytes()).decode()}
+    kept = DECOYS.setdefault("looks", {}).setdefault(key, [])
+    if rec["px"] not in {r.get("px") for r in kept}:
+        kept.append(rec)
+        del kept[:-DECOY_LOOKS_KEPT]
+
+
 def _merge_decoys(saved):
     """Add what decoys.json holds to the decoys in memory; the higher count wins."""
+    for k, recs in (saved.get("looks") or {}).items():
+        kept = DECOYS.setdefault("looks", {}).setdefault(k, [])
+        have = {r.get("px") for r in kept}
+        for r in recs if isinstance(recs, list) else []:
+            if isinstance(r, dict) and r.get("px") and r["px"] not in have:
+                kept.append(r)
+                have.add(r["px"])
+        del kept[:-DECOY_LOOKS_KEPT]
     for kind in ("close", "ui", "close_ok"):
         mine = DECOYS.setdefault(kind, {})
         for k, n in (saved.get(kind) or {}).items():
@@ -1874,7 +1940,8 @@ def save_decoys():
     with locked(DECOY_FILE):
         _merge_decoys(_read_json(DECOY_FILE, {}))
         _write_json(DECOY_FILE, {"close": DECOYS["close"], "ui": DECOYS["ui"], "wake": DECOYS.get("wake", {}),
-                                "near": DECOYS.get("near", {}), "close_ok": DECOYS.get("close_ok", {})})
+                                "near": DECOYS.get("near", {}), "close_ok": DECOYS.get("close_ok", {}),
+                                "looks": DECOYS.get("looks", {})})
 
 
 # ------------------------------------------------ ads learned to have no way out
@@ -2558,7 +2625,7 @@ def recover(cfg, base, log, attempts=6):
     return False
 
 
-DECOYS = {"ui": {}, "close": {}, "wake": {}, "close_ok": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store;
+DECOYS = {"ui": {}, "close": {}, "wake": {}, "close_ok": {}, "looks": {}}   # "picture@spot" / label -> number of ads in which tapping it opened the store;
 # "wake": ad screen name -> {"store": wake presses that opened the store, "badge": ones that brought the badge up}
 # "near": close picture -> {"tapped": near-miss taps on it, "closed": ones the ad closed right after}
 LAST_AD_END = {"why": None}        # why the last watch_ad gave up: "timeout" or "store-loop"
@@ -2715,17 +2782,38 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     last_alive_check = time.time()
     LAST_AD_END["why"] = None
 
-    def decoy_spots():
+    def decoy_spots(gray=None):
         # A spot counts as a decoy after opening the store on 2 ads, minus the ads it turned out to
-        # close after all ("close_ok": both counts only grow, so runs on other phones merge safely).
-        ok = DECOYS.get("close_ok", {})
-        return blocked_spots | {tuple(k.rsplit("@", 1)) for k, n in DECOYS["close"].items()
-                                if n - ok.get(k, 0) >= 2 and "@" in k}
+        # close after all ("close_ok": both counts only grow, so runs on other phones merge safely),
+        # and only while the screen there looks as it did when it opened the store ("looks"): another
+        # ad's button in the same corner is tapped as usual. A decoy from before looks were kept has
+        # none. A close picture stays refused (its "second chance" before BACK learns its look if it
+        # opens the store again); a skip picture is tapped again (skips get no second chance, and
+        # AppLovin's "Google Play" pill had banned real corner skips on every ad).
+        ok, looks = DECOYS.get("close_ok", {}), DECOYS.get("looks", {})
+        out = set(blocked_spots)
+        for k, n in DECOYS["close"].items():
+            if "@" not in k or n - ok.get(k, 0) < 2:
+                continue
+            if not looks.get(k):
+                if not k.startswith("skip_"):
+                    out.add(tuple(k.rsplit("@", 1)))
+                continue
+            if gray is None or getattr(gray, "ndim", 0) != 2 or looks_like_decoy(gray, looks[k]):
+                out.add(tuple(k.rsplit("@", 1)))
+        return out
+
+    def old_decoy(key):
+        """A skip picture remembered as a decoy before looks were kept (tapped again, see decoy_spots)."""
+        return (key.startswith("skip_") and not DECOYS.get("looks", {}).get(key)
+                and DECOYS["close"].get(key, 0) - DECOYS.get("close_ok", {}).get(key, 0) >= 2)
 
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
 
     def acted(kind, detail="", where=None, shot=None):
-        nonlocal last_act, tap_shot
+        nonlocal last_act, tap_shot, decoy_try
+        if decoy_try and len(decoy_try) > 2:
+            decoy_try = None                  # an old decoy's tap is forgiven only if nothing else came after it
         last_act = (kind, detail, time.time(), where)
         tap_shot = shot
 
@@ -2746,7 +2834,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
     def blame(kind, detail, where):
         """Something we tapped opened the store: don't tap it again on this ad (there)."""
-        nonlocal wake_blocked, pop_pick
+        nonlocal wake_blocked, pop_pick, decoy_try
         save_tap_shot(os.path.basename(detail) if detail else kind)
         if kind == "wake":
             wake_blocked = True
@@ -2762,6 +2850,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             key = (name, where or "?")
             blocked_spots.add(key)
             DECOYS["close"][f"{name}@{key[1]}"] = DECOYS["close"].get(f"{name}@{key[1]}", 0) + 1
+            if tap_shot and tap_shot[0] is not None:
+                decoy_look_record(f"{name}@{key[1]}", tap_shot[0], tap_shot[1], tap_shot[2])
+            if decoy_try and decoy_try[0] == f"{name}@{key[1]}":
+                decoy_try = None                    # it opened the store again: not forgiven
             save_decoys()
             log(f"  close picture {name} opened the store here - not using it in that spot on this ad")
         elif kind == "popup":
@@ -2773,7 +2865,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             near_record(last_near[0], "closed")           # the near-miss tap was the way out
         if result is True and dead_hit is not None:
             dead_look_record(dead_hit, "closed")         # it looked dead but closed: count against the look
-        if result is True and decoy_try and time.time() - decoy_try[1] < 15:
+        if result is True and decoy_try and (len(decoy_try) > 2 or time.time() - decoy_try[1] < 15):
             ok = DECOYS.setdefault("close_ok", {})
             ok[decoy_try[0]] = ok.get(decoy_try[0], 0) + 1
             save_decoys()
@@ -2833,7 +2925,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         play-and-bar icon turning into "Google Play") doesn't respond."""
         for _ in range(4):
             nap(cfg.get("badge_settle_seconds", 0.5), 0)
-            settled, _ = find_button(gray_screen(), stuck, stuck_thr, f"store-badge ({what})", decoy_spots())
+            settled, _ = find_button(g := gray_screen(), stuck, stuck_thr, f"store-badge ({what})", decoy_spots(g))
             if not settled:
                 break
             same = settled[3] == hit[3] and abs(settled[1] - hit[1]) < 12 and abs(settled[2] - hit[2]) < 12
@@ -2843,7 +2935,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         return hit
 
     def tap_button(hit, kind, gray, note=""):
-        nonlocal closed_once, guard_until, tap_changed
+        nonlocal closed_once, guard_until, tap_changed, decoy_try
         H, W = (gray.shape[:2] if gray is not None else screen_size()[::-1])
         # The same place tapped again and again with the ad still there (an "are you sure?" box over it,
         # say): set it aside and let the other ways out have a go. Counted per place, whichever saved
@@ -2862,6 +2954,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         log(f"  close button {os.path.basename(hit[3])} ({hit[0]:.2f}){note}")
         tap(hit[1], hit[2], jitter=2)
         acted(kind, hit[3], spot, shot=(gray, hit[1], hit[2]))
+        key = f"{os.path.basename(hit[3])}@{spot}"
+        if decoy_try is None and old_decoy(key):
+            decoy_try = (key, time.time(), "old")   # if the ad ends with nothing else tapped after it: forgiven
         tap_counts[spot] = tap_counts.get(spot, 0) + 1
         closed_once = True
         near_seen.clear()
@@ -3149,7 +3244,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
         # ---- always-safe buttons: skip, "reward granted" ----------------------------------------
         if skips and elapsed >= skip_after:
-            hit, _ = find_button(gray, skips, close_thr, "skip", decoy_spots())
+            hit, _ = find_button(gray, skips, close_thr, "skip", decoy_spots(gray))
             if hit:
                 tap_button(hit, "skip", gray, f" - a skip button, {elapsed:.0f}s in")
                 continue
@@ -3229,7 +3324,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         elif too_early:
             dlog("ad: still playing (progress bar or countdown) - not looking for a close button yet")
         else:
-            hit, nears = find_button(gray, close, close_thr, "close", decoy_spots()) if close else (None, [])
+            hit, nears = find_button(gray, close, close_thr, "close", decoy_spots(gray)) if close else (None, [])
             if hit:
                 tap_button(hit, "close", gray)
                 continue
@@ -3280,7 +3375,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 closed_once = True
                 nap(2)
                 continue
-            hit = thin_x(gray, decoy_spots()) if cfg.get("thin_x", True) and not ui else None
+            hit = thin_x(gray, decoy_spots(gray)) if cfg.get("thin_x", True) and not ui else None
             if hit:
                 tap_button(hit, "close", gray, " drawn on the ad")
                 continue
@@ -3298,7 +3393,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         badge_due = stuck and stuck_taps < max_stuck and time.time() - last_stuck > 10 and (
             (risky_ok and quiet >= stuck_s) or (badge_now and badge_seen and time.time() - badge_seen[1] < 3))
         if stuck and elapsed >= 3 and (badge_due or badge_now or looks % 2 == 0):
-            seen, bnears = find_button(gray, stuck, stuck_thr, "store-badge", decoy_spots(), second_look=badge_due)
+            seen, bnears = find_button(gray, stuck, stuck_thr, "store-badge", decoy_spots(gray), second_look=badge_due)
             if not seen:                                    # a faded badge: the same near-miss three looks running
                 cur = {}
                 for n in bnears:
@@ -3338,7 +3433,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 # The badge fades in, stays a moment and fades out: look again and again right away.
                 look_until = time.time() + 2.5
                 while not hit and time.time() < look_until:
-                    hit, _ = find_button(gray_screen(), stuck, stuck_thr, "store-badge (after wake)", decoy_spots())
+                    hit, _ = find_button(g := gray_screen(), stuck, stuck_thr, "store-badge (after wake)", decoy_spots(g))
                     if not hit:
                         nap(0.05, 0)
                 if hit:
@@ -3372,7 +3467,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 # first touch, and shrinks back after a few seconds: look right away for a badge - this
                 # one or its opened-up form - and tap it while it's showing. A badge still in view also
                 # means no store sheet has covered the ad.
-                again, _ = find_button(gray_screen(), stuck, stuck_thr, "store-badge (still there?)", decoy_spots())
+                again, _ = find_button(g := gray_screen(), stuck, stuck_thr, "store-badge (still there?)", decoy_spots(g))
                 if again:
                     again = settle_badge(again, "still opening?")   # it may be opening out into the pill
                 fg2, _a = focus()
@@ -3438,7 +3533,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             # (decoys.json) gets one try. Many real X's sit where a decoy once was (a top corner);
             # if it closes this ad, the spot is forgiven.
             if back_presses == 0 and decoy_try is None and close and gray is not None:
-                remembered = decoy_spots() - blocked_spots
+                remembered = decoy_spots(gray) - blocked_spots
                 hit, _ = find_button(gray, close, close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
                 k = (os.path.basename(hit[3]), spot_of(hit[1], hit[2], gray.shape[1], gray.shape[0])) if hit else None
                 if k in remembered:
