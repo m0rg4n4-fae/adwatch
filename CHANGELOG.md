@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### One more look before giving up when the screen has just changed (Nov 12)
+- **Before giving up on an ad, adwatch now checks whether the screen changed since its last look, and if so takes one more look (once per ad).** The decision to give up was based on a screenshot that can be several seconds old; a Google Play sheet closing over an ad, or an end card fading in, could reveal a plain X just before adwatch gave up and left it there.
+
 ### A last-try tap that opened the store is no longer credited when the ad ends right after (Nov 12)
 - **The one last-try tap adwatch gives a remembered store-opening spot is no longer counted as "it closed the ad" when it opened the store again and the ad happened to end on the way back.** Since the Nov 11 change, the mark for that tap was kept after a store trip (so that each ad gets only one last try), and an ad that ended within 15 seconds then credited the spot that had just opened the store. One last try per ad still holds.
 

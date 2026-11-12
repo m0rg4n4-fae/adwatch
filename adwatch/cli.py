@@ -2810,6 +2810,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
     last_try_used = False                 # that one more try is given once per ad
+    final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot, decoy_try
@@ -3551,12 +3552,24 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     tap_button(hit, "close", gray, " - a second chance")
                     continue
             if not can_back:                               # (an iPhone): BACK was the last thing left to try
+                if not final_look and gray is not None:
+                    final_look = True                          # the look above can be seconds old: a Play sheet closing,
+                    fresh = gray_screen()                      # an end card fading in... one more round if it changed
+                    if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
+                        dlog("ad: the screen changed since the last look - one more look before giving up")
+                        continue
                 snapshot("no-close-button", log)
                 log("  nothing left to try (this phone has no BACK key) - giving up on this one")
                 if learn_dead and look_thumb(gray) is not None:
                     dead_look_record(look_thumb(gray), "gave_up")
                 return finish(False, "timeout")
             if back_presses >= (1 if known_dead else 2 if fast and quiet < max_s else 3):
+                if not final_look and gray is not None:
+                    final_look = True                          # the look above can be seconds old: a Play sheet closing,
+                    fresh = gray_screen()                      # an end card fading in... one more round if it changed
+                    if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
+                        dlog("ad: the screen changed since the last look - one more look before giving up")
+                        continue
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)
                 if learn_dead and look_thumb(gray) is not None:
