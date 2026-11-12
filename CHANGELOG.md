@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A last-try tap that opened the store is no longer credited when the ad ends right after (Nov 12)
+- **The one last-try tap adwatch gives a remembered store-opening spot is no longer counted as "it closed the ad" when it opened the store again and the ad happened to end on the way back.** Since the Nov 11 change, the mark for that tap was kept after a store trip (so that each ad gets only one last try), and an ad that ended within 15 seconds then credited the spot that had just opened the store. One last try per ad still holds.
+
 ### An ad's end card no longer ends the ad early on an iPhone (Nov 12)
 - **On a phone that can't say which app is in front (an iPhone), when the program tells adwatch what its game looks like (`in_game`), adwatch no longer guesses that an ad is gone just because nothing is left to tap after its close button.** A video's X often opens an end card (Unity's: black, a white X in a dark box top right) that fades in a moment later; adwatch used to stop on that in-between look and hand the end card back to the program. It now keeps looking until the program's own check says the game is back, and taps the end card's X too. Android phones and programs without `in_game` work as before.
 

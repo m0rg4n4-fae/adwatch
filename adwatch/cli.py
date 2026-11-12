@@ -2809,6 +2809,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 and DECOYS["close"].get(key, 0) - DECOYS.get("close_ok", {}).get(key, 0) >= 2)
 
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
+    last_try_used = False                 # that one more try is given once per ad
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot, decoy_try
@@ -2852,9 +2853,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             DECOYS["close"][f"{name}@{key[1]}"] = DECOYS["close"].get(f"{name}@{key[1]}", 0) + 1
             if tap_shot and tap_shot[0] is not None:
                 decoy_look_record(f"{name}@{key[1]}", tap_shot[0], tap_shot[1], tap_shot[2])
-            if decoy_try and len(decoy_try) > 2 and decoy_try[0] == f"{name}@{key[1]}":
-                decoy_try = None                    # an old skip decoy opened the store again: not forgiven
-                # (a last-try marker stays set: one last try per ad, not one per remembered decoy)
+            if decoy_try and decoy_try[0] == f"{name}@{key[1]}":
+                decoy_try = None                    # it opened the store again: not forgiven if the ad ends now
+                # (last_try_used still holds: one last try per ad, not one per remembered decoy)
             save_decoys()
             log(f"  close picture {name} opened the store here - not using it in that spot on this ad")
         elif kind == "popup":
@@ -3539,12 +3540,13 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             # Before BACK: a close picture held back only because it opened the store on earlier ads
             # (decoys.json) gets one try. Many real X's sit where a decoy once was (a top corner);
             # if it closes this ad, the spot is forgiven.
-            if back_presses == 0 and decoy_try is None and close and gray is not None:
+            if back_presses == 0 and decoy_try is None and not last_try_used and close and gray is not None:
                 remembered = decoy_spots(gray) - blocked_spots
                 hit, _ = find_button(gray, close, close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
                 k = (os.path.basename(hit[3]), spot_of(hit[1], hit[2], gray.shape[1], gray.shape[0])) if hit else None
                 if k in remembered:
                     decoy_try = (f"{k[0]}@{k[1]}", time.time())
+                    last_try_used = True
                     log(f"  nothing else to tap: trying {k[0]} once, though it opened the store here on earlier ads")
                     tap_button(hit, "close", gray, " - a second chance")
                     continue
