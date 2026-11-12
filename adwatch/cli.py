@@ -2861,11 +2861,14 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
     def finish(result, why=None):
         LAST_AD_END["why"] = why
-        if result is True and last_near and time.time() - last_near[1] < 8:
+        # Closed: True in the ad loop, "closed" / "gone" in watch mode (home= given, as bots call it):
+        # the lessons below count in both (they only counted True, so bots' closes were never learned).
+        closed = result is True or result in ("closed", "gone")
+        if closed and last_near and time.time() - last_near[1] < 8:
             near_record(last_near[0], "closed")           # the near-miss tap was the way out
-        if result is True and dead_hit is not None:
+        if closed and dead_hit is not None:
             dead_look_record(dead_hit, "closed")         # it looked dead but closed: count against the look
-        if result is True and decoy_try and (len(decoy_try) > 2 or time.time() - decoy_try[1] < 15):
+        if closed and decoy_try and (len(decoy_try) > 2 or time.time() - decoy_try[1] < 15):
             ok = DECOYS.setdefault("close_ok", {})
             ok[decoy_try[0]] = ok.get(decoy_try[0], 0) + 1
             save_decoys()

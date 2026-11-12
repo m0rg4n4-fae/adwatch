@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Programs that use adwatch now learn from closed ads too (Nov 12)
+- **When a program hands its ads to adwatch (with the game's screens, `home=`), a closed ad now counts for what adwatch learns.** Such an ad ends as "closed" (or "gone"), and three lessons only counted a plain success: forgiving a remembered store-opening spot whose last-try tap closed the ad, counting a close against an ad picture learned as "no way out" (so ads that sometimes close aren't given up on too soon), and remembering near-miss taps that worked. The plain `adwatch` ad loop already learned them.
+
 ### Store-opening buttons remembered by how they look (Nov 11)
 - **A spot where a saved button once opened the store is now refused only while it looks the same.** adwatch remembers buttons that send you to the store instead of closing the ad. Until now it remembered just *which picture* matched and *roughly where* (a corner), so after AppLovin's "Google Play >>" pill had fooled a skip picture twice, that skip picture was never tapped in that corner again on any ad, not even a real skip button there. adwatch now also keeps a small picture of the spot, and refuses it only while the screen there still looks like that. Spots remembered before this update have no picture yet: skip buttons there are tried once more (and, if they open the store again, remembered with their look from then on); close buttons there stay refused and get their picture the next time their last-try tap opens the store.
 
