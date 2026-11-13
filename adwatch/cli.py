@@ -2828,7 +2828,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
     last_try_used = False                 # that one more try is given once per ad
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
-    sheet_swiped = False                  # (no BACK key) one swipe down from the top edge before giving up
+    sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot, decoy_try
@@ -3579,17 +3579,18 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
                         dlog("ad: the screen changed since the last look - one more look before giving up")
                         continue
-                if not sheet_swiped and gray is not None:
-                    # A sheet over the ad (Apple's App Store page: its X ignored our taps) closes with a
-                    # swipe down from its top edge. The finger goes down at the top middle, above the
-                    # sheet's own buttons; a swipe that only passes over a button never presses it.
+                if not sheet_swiped and gray is not None and max(tap_counts.values(), default=0) >= 2:
+                    # A sheet over the ad (Apple's App Store page: its X ignored two taps) closes with a
+                    # swipe down inside it. Not from the screen's top edge: on an iPhone that opens
+                    # Notification Center. The finger goes down at the middle, a third of the way down
+                    # (below the sheet's buttons); a swipe that only passes over a button never presses it.
                     sheet_swiped = True
                     if dismiss_alert():
                         log("  closed a system alert over the ad")
                         nap(1.0)
                     H, W = gray.shape[:2]
-                    log("  nothing else to tap: swiping down from the top edge (closes a sheet over the ad)")
-                    swipe(W // 2, int(H * 0.065), W // 2, int(H * 0.75), ms=350)
+                    log("  its X did nothing: swiping the sheet down (closes a sheet over the ad)")
+                    swipe(W // 2, int(H * 0.35), W // 2, int(H * 0.85), ms=350)
                     nap(2.0)                               # the next look sees whether the game is back
                     continue
                 snapshot("no-close-button", log)

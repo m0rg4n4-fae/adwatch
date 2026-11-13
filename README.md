@@ -207,7 +207,7 @@ aw.use_device(my_phone)                                             # or for eve
 - knows the game is back from your own check, if you pass one: `watch_ad(cfg, base, log, device=my_phone, in_game=lambda frame: ...)` returns as soon as it says True for a screenshot. Without one it uses the game's pictures (`back_in_game_templates`); with neither, it stops right after a tap that changes the screen, rather than risk tapping around in your game;
 - notices that an ad took the phone somewhere else from pictures of those places (`templates/common/away_*.png`, or `"away_templates"` in a profile: a browser's toolbar, say), and brings the game back with `activate()`. If the phone can only reopen the game by restarting it, the ad is given up on (`aw.LAST_AD_END["why"] == "reopened"`);
 - notices when the game's process has ended (`running()`), and opens it again;
-- before giving up, swipes down once from the top edge of the screen (a sheet over the ad, such as Apple's App Store page, closes that way even when its X ignores taps), after closing any system alert over it with `dismiss_alert()`;
+- when a close button was tapped twice and did nothing (a sheet over the ad, such as Apple's App Store page, whose X ignores taps), swipes the sheet down once before giving up, starting a third of the way down the screen (never from the top edge, which opens the iPhone's Notification Center), after closing any system alert over it with `dismiss_alert()`;
 - gives up where an Android phone would press BACK.
 
 </details>

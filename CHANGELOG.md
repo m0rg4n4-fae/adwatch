@@ -5,7 +5,8 @@
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
 ### iPhone: a swipe down closes a sheet over the ad (Nov 13)
-- **On a phone with no BACK key, before giving up on an ad, adwatch now swipes down once from the top edge of the screen.** Apple's App Store page can open as a sheet over an ad, and its X ignores the taps adwatch sends; iOS sheets close with a swipe down. The finger goes down at the top middle of the screen, above the sheet's buttons, so nothing on it (like "Get") is pressed.
+- **On a phone with no BACK key, when a close button has been tapped twice without effect, adwatch now swipes down once before giving up.** Apple's App Store page can open as a sheet over an ad, and its X ignores the taps adwatch sends; iOS sheets close with a swipe down. The finger goes down a third of the way down the screen, below the sheet's buttons (like "Get"), so none is pressed.
+- **Fixed the same day: the first version swiped from the top edge of the screen on every give-up**, which on an iPhone opens Notification Center; adwatch then tapped its "Clear" button once, taking it for a close button. The swipe now never starts at the top edge, and only follows close-button taps that did nothing.
 - **A phone connection may offer `dismiss_alert()`**: adwatch calls it before that swipe, to close a system alert lying over the ad (an iPhone's "Update Apple Watch" box, say).
 
 ### Spots that almost always open the store are refused whatever they look like (Nov 12)
