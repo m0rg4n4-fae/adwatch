@@ -1848,6 +1848,7 @@ def _write_json(path, data):
 DECOY_LOOK_R = 0.05        # a decoy's look: the screen around its tap point, this share of the short side each way
 DECOY_LOOKS_KEPT = 4       # looks kept per picture@spot (a few different ads' buttons can share one corner)
 DECOY_LOOK_LIKE = 0.8      # the screen there now "looks like" a remembered decoy at this score or better
+DECOY_SURE = 4             # opened the store this many times more than it closed an ad: refused there whatever it looks like
 
 
 def decoy_look(gray, x, y, wider=1.0, size=32):
@@ -2794,6 +2795,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         out = set(blocked_spots)
         for k, n in DECOYS["close"].items():
             if "@" not in k or n - ok.get(k, 0) < 2:
+                continue
+            if n - ok.get(k, 0) >= DECOY_SURE:          # a spot this sure (Google's skip-to-end disc, drawn dark
+                out.add(tuple(k.rsplit("@", 1)))        # or light over each ad's video) needs no look to match
                 continue
             if not looks.get(k):
                 if not k.startswith("skip_"):

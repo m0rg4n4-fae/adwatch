@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Spots that almost always open the store are refused whatever they look like (Nov 12)
+- **A remembered store-opening spot that has opened the store at least 4 times more than it has closed an ad is now refused there even when the screen looks different from before.** Some decoys change their look from ad to ad (Google's round skip-to-end disc is drawn dark or light over each ad's own video), so a saved picture of the spot only matched now and then and the decoy kept being tapped. Spots with a mixed record still go by their look.
+
 ### Surveys nobody can answer are skipped sooner (Nov 12)
 - **When a survey ad's X brings up "Are you sure you want to skip the survey?" and none of the saved answer pictures fits its questions, adwatch now taps Skip (a saved `giveup_*` picture) once the X has been tapped twice**, instead of tapping the X again until the ad is given up on. Before, Skip was only used after an answer picture had been tapped twice. The reward is lost either way; this way the ad ends cleanly instead of with a restart of the game.
 
