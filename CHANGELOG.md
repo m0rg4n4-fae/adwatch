@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### iPhone: the phone's own screens are never tapped (Nov 13)
+- **adwatch now recognises the iPhone's own screens (Notification Center, its search) and taps nothing on them**; it brings the game back to the front instead (at most 3 times, then gives up on the ad). Notification Center's round "Clear" button looks like an ad's close button, and adwatch had tapped it once. A picture of the search screen ships in the starter set (`system_*.png`); others, like Notification Center (whose picture shows the phone's own wallpaper), are saved the same way on your phone.
+
 ### iPhone: a swipe down closes a sheet over the ad (Nov 13)
 - **On a phone with no BACK key, when a close button has been tapped twice without effect, adwatch now swipes down once before giving up.** Apple's App Store page can open as a sheet over an ad, and its X ignores the taps adwatch sends; iOS sheets close with a swipe down. The finger goes down a third of the way down the screen, below the sheet's buttons (like "Get"), so none is pressed.
 - **Fixed the same day: the first version swiped from the top edge of the screen on every give-up**, which on an iPhone opens Notification Center; adwatch then tapped its "Clear" button once, taking it for a close button. The swipe now never starts at the top edge, and only follows close-button taps that did nothing.

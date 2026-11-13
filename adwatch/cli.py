@@ -2474,7 +2474,7 @@ def sync_starter():
     have = {_digest(p) for p in glob.glob(os.path.join(COMMON_DIR, "*.png"))}
     for src in sorted(glob.glob(os.path.join(STARTER_DIR, "*.png"))):
         name = os.path.basename(src)
-        if name in seen or not re.match(r"^(close|stuck|popup|skip|resume)_", name) or not os.path.exists(src + ".json"):
+        if name in seen or not re.match(r"^(close|stuck|popup|skip|resume|system)_", name) or not os.path.exists(src + ".json"):
             continue
         seen.add(name)
         dst = os.path.join(COMMON_DIR, name)
@@ -2497,7 +2497,7 @@ def cmd_pack(args):
     dst_dir = os.path.abspath(os.path.expanduser(args.to)) if args.to else STARTER_DIR
     os.makedirs(dst_dir, exist_ok=True)
     added = already = no_size = 0
-    for kind in ("close", "stuck", "popup", "skip", "resume"):
+    for kind in ("close", "stuck", "popup", "skip", "resume", "system"):
         for src in sorted(glob.glob(os.path.join(src_dir, f"{kind}_*.png"))):
             if not os.path.exists(src + ".json"):       # without its screen size it can't be rescaled
                 no_size += 1
@@ -2703,6 +2703,11 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     blind = not can_tell_front()
     back_in_game = [] if passive and not blind else game_markers(cfg, base)
     aways = with_common(cfg.get("away_templates", []), base, "away_*.png") if blind else []
+    # The phone's own screens (an iPhone's Notification Center, its search...): not an ad and not a
+    # place the ad sent us. Nothing on them is tapped (Notification Center's "Clear" looks like a close
+    # button); the game is brought back to the front, at most 3 times.
+    systems = with_common(cfg.get("system_templates", []), base, "system_*.png") if blind else []
+    system_trips = 0
     can_back = has_back()
     has_misc = bool(cfg.get("misc_buttons"))
     game_frame = None
@@ -3244,6 +3249,23 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             if hit:
                 log(f"  back in game after {elapsed:.0f}s")
                 return finish(back_result())
+        if systems and gray is not None:
+            hit = find(gray, systems, thr, "phone's own screen")
+            if hit:
+                system_trips += 1
+                if system_trips > 3:
+                    log("  the phone's own screen keeps coming back - giving up on this ad")
+                    snapshot("system-screen", log)
+                    return finish(False, "system-screen")
+                log("  the phone's own screen is in front (not an ad) - tapping nothing, bringing the game back")
+                if not activate(pkg):
+                    log("  this phone can only open the game by restarting it - the ad is gone with it")
+                    launch(pkg)
+                    nap(5)
+                    return finish(False, "reopened")
+                nap(2)
+                continue
+
         if not passive and has_misc and elapsed > 4 and clear_misc(cfg, base, log, gray):
             log(f"  back in game after {elapsed:.0f}s (one of its pop-ups was showing)")
             return finish(True)
