@@ -1595,6 +1595,19 @@ def in_edge_zone(x, y, w, h):
     return y <= h * EDGE_TOP or y >= h * (1 - EDGE_BOTTOM) or x <= w * EDGE_SIDE or x >= w * (1 - EDGE_SIDE)
 
 
+IOS_DECOY = "ios:"   # decoys.json keys learned on an iPhone: its ads behave differently, so it keeps its own
+
+
+def decoy_key(name, spot):
+    """decoys.json key of a picture in a screen cell; an iPhone's are kept apart from Android's."""
+    return f"{IOS_DECOY if device_platform() == 'ios' else ''}{name}@{spot}"
+
+
+def decoy_name(key):
+    """The picture's file name in a decoys.json key (without the phone kind or the cell)."""
+    return key[len(IOS_DECOY):].rsplit("@", 1)[0] if key.startswith(IOS_DECOY) else key.rsplit("@", 1)[0]
+
+
 def spot_of(x, y, w, h):
     """A coarse place on the screen (an 8x8 grid, per orientation), for remembering where a
     picture turned out to be a decoy."""
@@ -2811,23 +2824,25 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # AppLovin's "Google Play" pill had banned real corner skips on every ad).
         ok, looks = DECOYS.get("close_ok", {}), DECOYS.get("looks", {})
         out = set(blocked_spots)
+        ios = device_platform() == "ios"
         for k, n in DECOYS["close"].items():
-            if "@" not in k or n - ok.get(k, 0) < 2:
-                continue
+            if "@" not in k or n - ok.get(k, 0) < 2 or k.startswith(IOS_DECOY) != ios:
+                continue                                # (an iPhone only goes by what it learned itself)
+            spot = (decoy_name(k), k.rsplit("@", 1)[1])
             if n - ok.get(k, 0) >= DECOY_SURE:          # a spot this sure (Google's skip-to-end disc, drawn dark
-                out.add(tuple(k.rsplit("@", 1)))        # or light over each ad's video) needs no look to match
+                out.add(spot)                           # or light over each ad's video) needs no look to match
                 continue
             if not looks.get(k):
-                if not k.startswith("skip_"):
-                    out.add(tuple(k.rsplit("@", 1)))
+                if not decoy_name(k).startswith("skip_"):
+                    out.add(spot)
                 continue
             if gray is None or getattr(gray, "ndim", 0) != 2 or looks_like_decoy(gray, looks[k]):
-                out.add(tuple(k.rsplit("@", 1)))
+                out.add(spot)
         return out
 
     def old_decoy(key):
         """A skip picture remembered as a decoy before looks were kept (tapped again, see decoy_spots)."""
-        return (key.startswith("skip_") and not DECOYS.get("looks", {}).get(key)
+        return (decoy_name(key).startswith("skip_") and not DECOYS.get("looks", {}).get(key)
                 and DECOYS["close"].get(key, 0) - DECOYS.get("close_ok", {}).get(key, 0) >= 2)
 
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
@@ -2875,10 +2890,11 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             name = os.path.basename(detail)
             key = (name, where or "?")
             blocked_spots.add(key)
-            DECOYS["close"][f"{name}@{key[1]}"] = DECOYS["close"].get(f"{name}@{key[1]}", 0) + 1
+            dk = decoy_key(name, key[1])
+            DECOYS["close"][dk] = DECOYS["close"].get(dk, 0) + 1
             if tap_shot and tap_shot[0] is not None:
-                decoy_look_record(f"{name}@{key[1]}", tap_shot[0], tap_shot[1], tap_shot[2])
-            if decoy_try and decoy_try[0] == f"{name}@{key[1]}":
+                decoy_look_record(dk, tap_shot[0], tap_shot[1], tap_shot[2])
+            if decoy_try and decoy_try[0] == dk:
                 decoy_try = None                    # it opened the store again: not forgiven if the ad ends now
                 # (last_try_used still holds: one last try per ad, not one per remembered decoy)
             save_decoys()
@@ -2899,7 +2915,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             ok = DECOYS.setdefault("close_ok", {})
             ok[decoy_try[0]] = ok.get(decoy_try[0], 0) + 1
             save_decoys()
-            log(f"  {decoy_try[0].split('@')[0]} closed the ad there after all - it can be tapped there again")
+            log(f"  {decoy_name(decoy_try[0])} closed the ad there after all - it can be tapped there again")
         if result is not None:
             record_ad(pkg, "gave_up" if result is False else "watched", time.time() - start)
         return result
@@ -2984,7 +3000,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         log(f"  close button {os.path.basename(hit[3])} ({hit[0]:.2f}){note}")
         tap(hit[1], hit[2], jitter=2)
         acted(kind, hit[3], spot, shot=(gray, hit[1], hit[2]))
-        key = f"{os.path.basename(hit[3])}@{spot}"
+        key = decoy_key(os.path.basename(hit[3]), spot)
         if decoy_try is None and old_decoy(key):
             decoy_try = (key, time.time(), "old")   # if the ad ends with nothing else tapped after it: forgiven
         tap_counts[spot] = tap_counts.get(spot, 0) + 1
@@ -3590,7 +3606,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 hit, _ = find_button(gray, close, close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
                 k = (os.path.basename(hit[3]), spot_of(hit[1], hit[2], gray.shape[1], gray.shape[0])) if hit else None
                 if k in remembered:
-                    decoy_try = (f"{k[0]}@{k[1]}", time.time())
+                    decoy_try = (decoy_key(k[0], k[1]), time.time())
                     last_try_used = True
                     log(f"  nothing else to tap: trying {k[0]} once, though it opened the store here on earlier ads")
                     tap_button(hit, "close", gray, " - a second chance")

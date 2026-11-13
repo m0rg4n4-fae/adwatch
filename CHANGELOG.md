@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### An iPhone keeps its own list of store-opening spots (Nov 13)
+- **Spots where a button opened the store are now remembered separately for iPhones** (keys starting with `ios:` in `decoys.json`). Google's round "skip to end" button had opened the Play Store 7 times on an Android phone, so adwatch refused it everywhere, and on an iPhone several ads whose only way forward was that button were given up on. The iPhone now tries such spots itself and learns its own; Android's list is unchanged.
+
 ### iPhone: a close button that didn't respond gets one more go before giving up (Nov 13)
 - **On a phone with no BACK key, a close button set aside after taps that did nothing is tried once more before adwatch gives up on the ad.** Some ads (Google's, on the iPhone) ignore their X for the first several seconds; adwatch set it aside after three early taps and gave up before its later retry came round. Seen three times in one morning; twice, the same X closed the ad a few seconds later.
 
