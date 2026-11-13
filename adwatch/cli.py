@@ -3596,11 +3596,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     continue
             if not can_back:                               # (an iPhone): BACK was the last thing left to try
                 if not final_look and gray is not None:
-                    final_look = True                          # the look above can be seconds old: a Play sheet closing,
-                    fresh = gray_screen()                      # an end card fading in... one more round if it changed
-                    if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
-                        dlog("ad: the screen changed since the last look - one more look before giving up")
-                        continue
+                    final_look = True                          # the look above can be seconds old (a Play sheet closing, an
+                    dlog("ad: one more look before giving up")  # end card or App Store page still loading): one more round.
+                    continue                                   # (Not "only if the screen changed": a small X on a big page
+                                                               # hardly changes a thumbnail - Vinted's App Store page, 10:46.)
                 if not sheet_swiped and gray is not None and max(tap_counts.values(), default=0) >= 2:
                     # A sheet over the ad (Apple's App Store page: its X ignored two taps) closes with a
                     # swipe down inside it. Not from the screen's top edge: on an iPhone that opens
@@ -3622,11 +3621,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 return finish(False, "timeout")
             if back_presses >= (1 if known_dead else 2 if fast and quiet < max_s else 3):
                 if not final_look and gray is not None:
-                    final_look = True                          # the look above can be seconds old: a Play sheet closing,
-                    fresh = gray_screen()                      # an end card fading in... one more round if it changed
-                    if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
-                        dlog("ad: the screen changed since the last look - one more look before giving up")
-                        continue
+                    final_look = True                          # the look above can be seconds old (a Play sheet closing, an
+                    dlog("ad: one more look before giving up")  # end card or App Store page still loading): one more round.
+                    continue                                   # (Not "only if the screen changed": a small X on a big page
+                                                               # hardly changes a thumbnail - Vinted's App Store page, 10:46.)
                 log("  ad wouldn't close - giving up on this one")
                 snapshot("gave-up", log)
                 if learn_dead and look_thumb(gray) is not None:

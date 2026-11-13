@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Always one more look before giving up (Nov 13)
+- **Before giving up on an ad, adwatch now always takes one more look, once per ad** (before: only if the screen had changed since the last look). A small X that appears last, like the one on an App Store page that finished loading, hardly changes the whole screen, so the change check missed it and adwatch gave up with the X in plain sight.
+
 ### iPhone: the phone's own screens are never tapped (Nov 13)
 - **adwatch now recognises the iPhone's own screens (Notification Center, its search) and taps nothing on them**; it brings the game back to the front instead (at most 3 times, then gives up on the ad). Notification Center's round "Clear" button looks like an ad's close button, and adwatch had tapped it once. A picture of the search screen ships in the starter set (`system_*.png`); others, like Notification Center (whose picture shows the phone's own wallpaper), are saved the same way on your phone.
 
