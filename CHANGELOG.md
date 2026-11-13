@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### adwatch waits while the phone's picture is out of date (Nov 13)
+- **A phone connection may offer `stale()`**: while it says the picture is out of date (an iPhone's screen stream that stopped sending anything), adwatch taps nothing and waits, and the waiting doesn't count towards giving up. Before, a frozen picture made working taps look ignored, and an ad (or the game behind it) could be given up on while the stream was down.
+
 ### An iPhone keeps its own list of store-opening spots (Nov 13)
 - **Spots where a button opened the store are now remembered separately for iPhones** (keys starting with `ios:` in `decoys.json`). Google's round "skip to end" button had opened the Play Store 7 times on an Android phone, so adwatch refused it everywhere, and on an iPhone several ads whose only way forward was that button were given up on. The iPhone now tries such spots itself and learns its own; Android's list is unchanged.
 

@@ -455,6 +455,19 @@ def activate(pkg):
         return False
 
 
+def picture_stale():
+    """True while the phone connection says its picture is out of date (an iPhone's screen stream that
+    stopped sending anything: the newest frame is old). A still screen is not stale. Optional stale()."""
+    st = getattr(DEVICE, "stale", None) if DEVICE is not None else None
+    if not callable(st):
+        return False
+    try:
+        return bool(st())
+    except Exception as e:
+        dlog(f"stale(): {e!r}")
+        return False
+
+
 def dismiss_alert():
     """Close a system alert lying over the ad through the phone connection's own dismiss_alert()
     (an iPhone's "Update Apple Watch"... box: its Dismiss); False if it has none or found none."""
@@ -2848,6 +2861,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
     last_try_used = False                 # that one more try is given once per ad
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
+    said_stale = False                    # "the phone's picture stopped updating" said for this wait
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
     x_retried = False                     # (no BACK key) a set-aside close button gets one more go before giving up
 
@@ -3164,6 +3178,16 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 return finish("closed" if acted_any else "gone")
             continue
 
+        if picture_stale():
+            # The phone's picture is out of date (its stream went silent): nothing seen now is the real
+            # screen. Wait for it, and don't let the waiting count towards giving up.
+            if not said_stale:
+                log("  the phone's picture stopped updating - waiting for it before doing anything")
+                said_stale = True
+            last_moving = time.time()
+            nap(1.0)
+            continue
+        said_stale = False
         gray = gray_screen()
         H, W = gray.shape[:2] if gray is not None else screen_size()[::-1]
         looks += 1
