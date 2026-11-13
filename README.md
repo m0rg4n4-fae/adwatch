@@ -201,12 +201,13 @@ result = aw.watch_ad(cfg, base, log, home=home, device=my_phone)   # just for th
 aw.use_device(my_phone)                                             # or for everything from now on (None = adb again)
 ```
 
-`my_phone` needs `screenshot()` (a BGR picture), `tap(x, y, hold=seconds)` and `swipe(x0, y0, x1, y1, ms=...)`. It may also have `key(name)` (`"BACK"`, `"HOME"`...; raise `ValueError` for a key it doesn't have), `foreground_activity()` (`"package/Activity"` of what's in front), `start_app(pkg)`, `stop_app(pkg)`, `running(pkg)`, `activate(pkg)` (bring the running game to the front without restarting it), `shell(cmd)`, `size`, `serial`, `platform` and `has_back`. Whatever it lacks is simply not used.
+`my_phone` needs `screenshot()` (a BGR picture), `tap(x, y, hold=seconds)` and `swipe(x0, y0, x1, y1, ms=...)`. It may also have `key(name)` (`"BACK"`, `"HOME"`...; raise `ValueError` for a key it doesn't have), `foreground_activity()` (`"package/Activity"` of what's in front), `start_app(pkg)`, `stop_app(pkg)`, `running(pkg)`, `activate(pkg)` (bring the running game to the front without restarting it), `dismiss_alert()` (close a system alert lying over the ad and return True, e.g. an iPhone's "Update Apple Watch" box), `shell(cmd)`, `size`, `serial`, `platform` and `has_back`. Whatever it lacks is simply not used.
 
 **iPhones (and other phones that can't say which app is in front).** A connection without `foreground_activity()` is treated as such a phone, and one with `platform = "ios"` as having no BACK key. adwatch then:
 - knows the game is back from your own check, if you pass one: `watch_ad(cfg, base, log, device=my_phone, in_game=lambda frame: ...)` returns as soon as it says True for a screenshot. Without one it uses the game's pictures (`back_in_game_templates`); with neither, it stops right after a tap that changes the screen, rather than risk tapping around in your game;
 - notices that an ad took the phone somewhere else from pictures of those places (`templates/common/away_*.png`, or `"away_templates"` in a profile: a browser's toolbar, say), and brings the game back with `activate()`. If the phone can only reopen the game by restarting it, the ad is given up on (`aw.LAST_AD_END["why"] == "reopened"`);
 - notices when the game's process has ended (`running()`), and opens it again;
+- before giving up, swipes down once from the top edge of the screen (a sheet over the ad, such as Apple's App Store page, closes that way even when its X ignores taps), after closing any system alert over it with `dismiss_alert()`;
 - gives up where an Android phone would press BACK.
 
 </details>

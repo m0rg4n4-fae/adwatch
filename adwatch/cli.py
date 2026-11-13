@@ -455,6 +455,19 @@ def activate(pkg):
         return False
 
 
+def dismiss_alert():
+    """Close a system alert lying over the ad through the phone connection's own dismiss_alert()
+    (an iPhone's "Update Apple Watch"... box: its Dismiss); False if it has none or found none."""
+    d = getattr(DEVICE, "dismiss_alert", None) if DEVICE is not None else None
+    if not callable(d):
+        return False
+    try:
+        return bool(d())
+    except Exception as e:
+        dlog(f"dismiss_alert(): {e!r}")
+        return False
+
+
 def _grab_png():
     return _decode(adb("exec-out", "screencap", "-p", binary=True, timeout=SCREENCAP_TIMEOUT["png"]))
 
@@ -2815,6 +2828,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
     last_try_used = False                 # that one more try is given once per ad
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
+    sheet_swiped = False                  # (no BACK key) one swipe down from the top edge before giving up
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot, decoy_try
@@ -3565,6 +3579,19 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     if fresh is not None and fresh.shape == gray.shape and not same_screen(fresh, gray):
                         dlog("ad: the screen changed since the last look - one more look before giving up")
                         continue
+                if not sheet_swiped and gray is not None:
+                    # A sheet over the ad (Apple's App Store page: its X ignored our taps) closes with a
+                    # swipe down from its top edge. The finger goes down at the top middle, above the
+                    # sheet's own buttons; a swipe that only passes over a button never presses it.
+                    sheet_swiped = True
+                    if dismiss_alert():
+                        log("  closed a system alert over the ad")
+                        nap(1.0)
+                    H, W = gray.shape[:2]
+                    log("  nothing else to tap: swiping down from the top edge (closes a sheet over the ad)")
+                    swipe(W // 2, int(H * 0.065), W // 2, int(H * 0.75), ms=350)
+                    nap(2.0)                               # the next look sees whether the game is back
+                    continue
                 snapshot("no-close-button", log)
                 log("  nothing left to try (this phone has no BACK key) - giving up on this one")
                 if learn_dead and look_thumb(gray) is not None:

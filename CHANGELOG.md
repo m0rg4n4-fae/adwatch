@@ -4,6 +4,10 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### iPhone: a swipe down closes a sheet over the ad (Nov 13)
+- **On a phone with no BACK key, before giving up on an ad, adwatch now swipes down once from the top edge of the screen.** Apple's App Store page can open as a sheet over an ad, and its X ignores the taps adwatch sends; iOS sheets close with a swipe down. The finger goes down at the top middle of the screen, above the sheet's buttons, so nothing on it (like "Get") is pressed.
+- **A phone connection may offer `dismiss_alert()`**: adwatch calls it before that swipe, to close a system alert lying over the ad (an iPhone's "Update Apple Watch" box, say).
+
 ### Spots that almost always open the store are refused whatever they look like (Nov 12)
 - **A remembered store-opening spot that has opened the store at least 4 times more than it has closed an ad is now refused there even when the screen looks different from before.** Some decoys change their look from ad to ad (Google's round skip-to-end disc is drawn dark or light over each ad's own video), so a saved picture of the spot only matched now and then and the decoy kept being tapped. Spots with a mixed record still go by their look.
 
