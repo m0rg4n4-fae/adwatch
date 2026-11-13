@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### iPhone: a close button that didn't respond gets one more go before giving up (Nov 13)
+- **On a phone with no BACK key, a close button set aside after taps that did nothing is tried once more before adwatch gives up on the ad.** Some ads (Google's, on the iPhone) ignore their X for the first several seconds; adwatch set it aside after three early taps and gave up before its later retry came round. Seen three times in one morning; twice, the same X closed the ad a few seconds later.
+
 ### Always one more look before giving up (Nov 13)
 - **Before giving up on an ad, adwatch now always takes one more look, once per ad** (before: only if the screen had changed since the last look). A small X that appears last, like the one on an App Store page that finished loading, hardly changes the whole screen, so the change check missed it and adwatch gave up with the X in plain sight.
 

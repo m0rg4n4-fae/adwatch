@@ -2834,6 +2834,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     last_try_used = False                 # that one more try is given once per ad
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
+    x_retried = False                     # (no BACK key) a set-aside close button gets one more go before giving up
 
     def acted(kind, detail="", where=None, shot=None):
         nonlocal last_act, tap_shot, decoy_try
@@ -3600,6 +3601,16 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     dlog("ad: one more look before giving up")  # end card or App Store page still loading): one more round.
                     continue                                   # (Not "only if the screen changed": a small X on a big page
                                                                # hardly changes a thumbnail - Vinted's App Store page, 10:46.)
+                if guard_blocked and not x_retried:
+                    # An X set aside after taps that did nothing may just not have been working yet (some
+                    # ads ignore their X for a while): it gets its later go now, before giving up.
+                    x_retried = True
+                    blocked_spots.difference_update(guard_blocked)
+                    for _, sp in guard_blocked:
+                        tap_counts.pop(sp, None)
+                    guard_blocked.clear()
+                    log("  trying the close button that didn't respond earlier once more")
+                    continue
                 if not sheet_swiped and gray is not None and max(tap_counts.values(), default=0) >= 2:
                     # A sheet over the ad (Apple's App Store page: its X ignored two taps) closes with a
                     # swipe down inside it. Not from the screen's top edge: on an iPhone that opens
