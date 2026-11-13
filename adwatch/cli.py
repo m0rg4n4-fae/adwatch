@@ -3311,7 +3311,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     f"one BACK after {no_exit_s}s with nothing to tap, then giving up")
                 said_dead = True
 
-        if giveups and not passive and any(n >= 2 for n in answer_used.values()) and gray is not None:
+        # Skip (the reward is lost) once the survey can't be answered: an answer picture has had its
+        # two taps, or none fits and the X has been tapped twice with the box still coming back.
+        if (giveups and not passive and gray is not None
+                and (any(n >= 2 for n in answer_used.values()) or max(tap_counts.values(), default=0) >= 2)):
             ranked = [r for r in score_all(gray, giveups) if r[0] >= close_thr]
             if ranked:
                 hit = ranked[0]
