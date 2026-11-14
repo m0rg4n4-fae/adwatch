@@ -1548,7 +1548,13 @@ def score_all(gray, paths, stop_at=None, thorough=False):
     half = half_integ = None
     use_edge = (lambda sc: thorough or EDGE_BAND <= sc < high)
     for p in paths:
-        t = load_template(p, short)
+        try:
+            t = load_template(p, short)
+        except FileNotFoundError:           # deleted or half copied meanwhile: skip it, don't stop the ad
+            if (p, "unreadable") not in _warned:
+                _warned.add((p, "unreadable"))
+                dlog(f"template {os.path.basename(p)} is missing or unreadable - skipped")
+            continue
         if t.shape[0] > small.shape[0] or t.shape[1] > small.shape[1]:
             continue
         gkey = (p, short, "grad")
@@ -2544,8 +2550,11 @@ def sync_starter():
         dst = os.path.join(COMMON_DIR, name)
         if not os.path.exists(dst) and _digest(src) not in have:     # skip pictures you already have
             os.makedirs(COMMON_DIR, exist_ok=True)
-            shutil.copyfile(src, dst)
+            # The size file first, the picture last and in one step: a bot reading the folder right now
+            # finds a picture only once it is whole and its size is known.
             shutil.copyfile(src + ".json", dst + ".json")
+            shutil.copyfile(src, dst + ".tmp")
+            os.replace(dst + ".tmp", dst)
             added += 1
     if seen != set(state.get("starter_seen", [])):
         save_state(dict(load_state(), starter_seen=sorted(seen)))
