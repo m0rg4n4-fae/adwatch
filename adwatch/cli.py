@@ -593,11 +593,22 @@ def screenshot():
         return img
     err1 = LAST_ERR
     # Fallback: some phone/adb combos mangle exec-out. Save on the phone, then pull.
+    # (A name of its own per phone and process, and no old file on either side to be read by mistake:
+    # a stale or another phone's picture here would make adwatch tap at the wrong spots.)
     import tempfile
-    tmp = os.path.join(tempfile.gettempdir(), "adwatch_shot.png")
+    tmp = os.path.join(tempfile.gettempdir(), f"adwatch_shot_{re.sub(r'[^A-Za-z0-9]', '_', SERIAL or 'any')}_{os.getpid()}.png")
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    adb("shell", "rm", "-f", "/sdcard/adwatch_shot.png")
     adb("shell", "screencap", "-p", "/sdcard/adwatch_shot.png")
     adb("pull", "/sdcard/adwatch_shot.png", tmp)
-    img = cv2.imread(tmp)
+    img = cv2.imread(tmp) if os.path.exists(tmp) else None
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
     if img is not None:
         return img
     # The phone may have dropped off adb for a moment (a USB hiccup): if it isn't listed, give it up
