@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A tap that timed out is no longer sent a second time (Nov 13, from a code review)
+- **When the phone's fast input shell doesn't answer in time, adwatch no longer repeats the tap through plain adb.** The first tap may well have gone through on a slow phone, so a repeat was a double tap, perhaps on the game after the ad had closed. Two timeouts in a row switch the fast shell off (taps then go through plain adb); a shell that is gone is replaced as before. A fast shell that fails to start no longer leaves its adb process behind.
+
 ### Safer when the phone doesn't say which app is in front (Nov 13, from a code review)
 - **On a phone that can tell which app is in front (Android), a look where it gave no answer taps nothing**, up to 3 looks in a row, then carries on as before. The ad may have just opened the Play Store or a sign-in page, which a tap meant for the ad would land on. iPhones are unaffected (they can never tell).
 - **Samsung's Galaxy Store counts as a store**, like Google Play, not as "another app showing an ad for the game".

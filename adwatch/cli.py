@@ -748,10 +748,15 @@ class FastInput:
         self.q = queue.Queue()
         threading.Thread(target=self._reader, daemon=True).start()
         self.n = 0
-        out = self.run("cmd input 2>&1 | head -20", timeout=8)
-        if out is None:
-            raise RuntimeError("the adb shell didn't answer")
-        self.prog = "cmd input" if re.search(r"\btap\b", out) and "Can't find service" not in out else "input"
+        self.last = "ok"                    # how the latest run() ended: "ok", "timeout" or "gone"
+        try:
+            out = self.run("cmd input 2>&1 | head -20", timeout=8)
+            if out is None:
+                raise RuntimeError("the adb shell didn't answer")
+            self.prog = "cmd input" if re.search(r"\btap\b", out) and "Can't find service" not in out else "input"
+        except Exception:
+            self.close()                    # (don't leave the adb process and its reader thread behind)
+            raise
         dlog(f"fast input: persistent adb shell, using '{self.prog}'")
 
     def _reader(self):
@@ -760,13 +765,16 @@ class FastInput:
         self.q.put(None)
 
     def run(self, command, timeout=5):
-        """Run a command in the open shell and wait for it to finish; None if the shell is gone."""
+        """Run a command in the open shell and wait for it to finish. None if it didn't: self.last says
+        whether the shell is gone ("gone") or just didn't answer in time ("timeout": the command may
+        still have run, so a caller sending a tap must not send it again)."""
         self.n += 1
         marker = f"__adwatch_{self.n}__"
         try:
             self.p.stdin.write(f"{command}; echo {marker}\n")
             self.p.stdin.flush()
         except (OSError, ValueError):
+            self.last = "gone"
             return None
         out, end = [], time.time() + timeout
         while time.time() < end:
@@ -775,10 +783,13 @@ class FastInput:
             except self.queue.Empty:
                 break
             if line is None:
+                self.last = "gone"
                 return None
             if marker in line:
+                self.last = "ok"
                 return "".join(out)
             out.append(line)
+        self.last = "timeout"
         return None
 
     def close(self):
@@ -790,7 +801,7 @@ class FastInput:
 
 
 FAST_INPUT = os.environ.get("ADWATCH_FAST_INPUT", "1") != "0"
-_FAST = {"obj": None, "failed": False}
+_FAST = {"obj": None, "failed": False, "timeouts": 0}
 
 
 def input_cmd(args):
@@ -811,9 +822,22 @@ def input_cmd(args):
             if _FAST["obj"] is None:
                 _FAST["obj"] = FastInput()
             t0 = time.time()
-            if _FAST["obj"].run(f"{_FAST['obj'].prog} {args}") is not None:
+            obj = _FAST["obj"]
+            if obj.run(f"{obj.prog} {args}") is not None:
+                _FAST["timeouts"] = 0
                 dlog(f"input {args} ({(time.time() - t0) * 1000:.0f} ms, fast)")
                 return
+            if obj.last == "timeout":
+                # No answer in time, but the shell is there and the tap may well have gone through (a slow
+                # phone): sending it again would be a second tap, maybe on the game after the ad closed.
+                _FAST["timeouts"] += 1
+                dlog(f"input {args}: no answer in time - NOT sending it again ({_FAST['timeouts']} in a row)")
+                if _FAST["timeouts"] >= 2:             # timing out again and again: plain adb from now on
+                    _FAST["failed"] = True
+                    obj.close()
+                    dlog("fast input: switched off after two timeouts, using plain adb shell input")
+                return
+            # (the shell is gone: nothing was sent, so sending it the plain way below is safe)
         except Exception as e:
             dlog(f"fast input unavailable: {e}")
         _FAST["failed"] = True                         # fall back to one adb call per tap from now on
