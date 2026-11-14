@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A skip button is never tapped on an ad known to have no way out (Nov 13)
+- **When a saved no-way-out picture matches the ad, adwatch no longer taps a skip button on it.** A native ad's round play-and-bar icon looks like a skip button but opens the App Store (an iPhone ad, Frankenmuth; the Packz video's yellow icon is the same). Those ads are now recognised and given up on, not tapped.
+
 ### classify(): one look at an ad screen without a phone; no-way-out pictures for phones without BACK (Nov 13)
 - **New `classify(screenshot)`**: says what adwatch's saved pictures make of one ad screen (tap here, no way out, the phone's own screen, or wait), for programs that drive their own phone, such as an iPhone bot without adb.
 - **New `nobackdead_*.png` pictures: ads with no way out only on a phone without a BACK key.** On Android BACK often closes them (SurveyPop's survey card), so they aren't `deadend_` pictures; on an iPhone nothing does.

@@ -3372,8 +3372,13 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     return finish(False, "store-loop")
                 continue
 
+        # An ad known to have no way out is never tapped, not even its "skip" (on an iPhone a native ad's
+        # round play-and-bar icon opens the App Store). Matched once per look, used again below.
+        dead_hits = ([r for r in score_all(gray, deadends) if r[0] >= close_thr]
+                     if deadends and gray is not None else [])
+
         # ---- always-safe buttons: skip, "reward granted" ----------------------------------------
-        if skips and elapsed >= skip_after:
+        if skips and elapsed >= skip_after and not dead_hits:
             hit, _ = find_button(gray, skips, close_thr, "skip", decoy_spots(gray))
             if hit:
                 tap_button(hit, "skip", gray, f" - a skip button, {elapsed:.0f}s in")
@@ -3416,7 +3421,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 continue
 
         if deadends and gray is not None and elapsed >= wait_s:
-            ranked = [r for r in score_all(gray, deadends) if r[0] >= close_thr]
+            ranked = dead_hits
             deadend_looks = deadend_looks + 1 if ranked else 0
             if deadend_looks >= 2:
                 log(f"  this ad is a known dead end ({os.path.basename(ranked[0][3])} {ranked[0][0]:.2f}): "
