@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A playing video no longer counts as "nothing happening" for give_up_seconds (Nov 13)
+- **`give_up_seconds` now counts from the ad's last movement, including a video that keeps playing without a progress bar.** Before, only a progress bar or countdown counted as movement, so a full-screen video was given up on after `give_up_seconds` while it was still playing (seen at 27 s, with the whole picture changing on every look). `ad_max_seconds` still limits ads that keep moving forever.
+
 ### No store-badge trick on a phone without a BACK key (Nov 13)
 - **On a phone with no BACK key (an iPhone), adwatch no longer presses an ad's store badge on purpose.** On Android that trick (go to the store, come back with BACK to a finished ad) often frees a stuck ad; without BACK it only leaves for the App Store, whose page may not close. A program can still turn it on with `"max_stuck_taps"`.
 

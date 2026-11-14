@@ -3617,7 +3617,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         badge_pending = stuck and badge_seen and stuck_taps == 0
         known_dead = dead_seen >= 2
         fast = ((ended or known_dead) and now - last_try >= no_exit_s
-                or give_up_s is not None and now - last_try >= give_up_s) and not badge_pending
+                or give_up_s is not None and now - max(last_try, last_video) >= give_up_s) and not badge_pending
+        # (give_up_seconds counts from the last sign of life: a video that keeps playing with no progress
+        #  bar is not "nothing happening" - Tile Match gave up on one at 27 s, 24 of 24 cells changing)
         if risky_ok and (quiet >= max_s or fast):
             if check_touch_lock(cfg, log):                 # nothing worked because taps were being swallowed
                 last_lock_check = time.time()
