@@ -2804,6 +2804,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     near_tries = cfg.get("near_miss_tries", 6)
     tap_counts, guard_blocked = {}, set() # taps per spot on this ad; (picture, spot) pairs set aside
     guard_until = 0.0                     # ...until then (an X that doesn't respond yet may later)
+    ignored_spots, retry_saved = set(), set()  # spots whose X ignored our taps; those whose retry screen was saved
     ad_kind = None                        # the ad's screen name (AdActivity, AppLovinFullscreenActivity...)
     teach_on = bool(cfg.get("_teach"))
     next_teach = cfg.get("teach_after", 45)
@@ -3013,8 +3014,15 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 blocked_spots.add(k)
             if first:
                 log(f"  tapped there {tap_counts[spot]} times and the ad is still showing - trying other ways out")
-                guard_until = time.time() + cfg.get("same_tap_pause", 20)
+                # An X that ignores taps often just isn't active yet. On a phone with BACK a wrong tap is cheap,
+                # so it gets its next go sooner. The screen is kept to compare with the one where it works.
+                guard_until = time.time() + cfg.get("same_tap_pause", 10 if can_back else 20)
+                ignored_spots.add(spot)
+                snapshot(f"x-ignored-{os.path.basename(hit[3])}", dlog)
             return
+        if spot in ignored_spots and spot not in retry_saved:
+            retry_saved.add(spot)                       # the same X tapped again later: its look then, to compare
+            snapshot(f"x-retry-{os.path.basename(hit[3])}", dlog)
         log(f"  close button {os.path.basename(hit[3])} ({hit[0]:.2f}){note}")
         tap(hit[1], hit[2], jitter=2)
         acted(kind, hit[3], spot, shot=(gray, hit[1], hit[2]))
@@ -3479,7 +3487,8 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             # Nothing to tap after a close tap: guessed gone. Not on a phone that can't say which app
             # is in front when the caller can tell its game: there the next look may be the ad's end
             # card fading in (a Unity card with its own X), and the caller's in_game says when it's over.
-            if closed_once and not back_in_game and not passive and not (blind and in_game is not None):
+            if (closed_once and not back_in_game and not passive and not (blind and in_game is not None)
+                    and not guard_blocked):              # (an X only set aside after ignored taps: still there)
                 log(f"  ad dismissed after {elapsed:.0f}s")
                 return finish(True)
 

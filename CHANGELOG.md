@@ -4,6 +4,11 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A close button that ignores early taps is retried sooner, and its screens are kept (Nov 13)
+- **On a phone with a BACK key, a close button set aside after taps that did nothing gets its next go after 10 seconds instead of 20** (`same_tap_pause` still sets it). Some ads (Facebook's Audience Network, for one) show their X long before it works; a heart ad was closed by the same X 30 seconds after it was set aside.
+- **adwatch now saves the screen when it sets such an X aside (`x-ignored-...`) and again when it retries it (`x-retry-...`)**, in `debug/`, so the two looks can be compared: an X that isn't active yet may look slightly different.
+- **Fixed: with an X set aside, adwatch's ad loop could take the next look's "nothing to tap" as the ad being gone** and stop while the ad was still up.
+
 ### A skip button is tried again even where it often opened the store; fewer slow UI-tree reads (Nov 13)
 - **A skip picture in a spot remembered as a store-opener is tried again whenever the screen there looks different from before, however lopsided its record.** Yesterday's rule refused such a spot whatever it looked like; for skip buttons that was too strict: Google's round "skip to end" button was never pressed and an 80-second ad was waited out in full. A wrong skip tap only costs a trip to the store and BACK (and that spot isn't used again on that ad). Close buttons keep the stricter rule.
 - **The UI-tree read (a list of the buttons on screen, ~3 s on some phones) backs off on an ad where it keeps finding nothing**: every 6, then 12, 24 and 48 seconds, instead of on nearly every look. Each look is quicker, so adwatch reacts sooner when a button does appear.
