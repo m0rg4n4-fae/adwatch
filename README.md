@@ -211,6 +211,10 @@ aw.use_device(my_phone)                                             # or for eve
 - when a close button was tapped twice and did nothing (a sheet over the ad, such as Apple's App Store page, whose X ignores taps), swipes the sheet down once before giving up, starting a third of the way down the screen (never from the top edge, which opens the iPhone's Notification Center), after closing any system alert over it with `dismiss_alert()`;
 - gives up where an Android phone would press BACK.
 
+Pictures of ads with no way out only on a phone without BACK (on Android BACK often closes them) go in `templates/common/nobackdead_*.png`; they're used only there.
+
+**Just one look, no phone connection:** `aw.classify(screenshot)` returns `("tap", x, y, picture)` for a skip or close button, `("dead_end", picture)` for an ad with no way out (give up after it shows on 2 looks in a row), `("system", picture)` for the phone's own screen (tap nothing) or `("wait", None)`. It doesn't remember spots that opened the store or learn anything; `watch_ad(..., device=...)` handles the whole ad and is safer.
+
 </details>
 
 <details>

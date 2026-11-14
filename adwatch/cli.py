@@ -2393,6 +2393,33 @@ def with_common(patterns, base, common_glob):
     return unique_files(sorted(set(os.path.abspath(p) for p in paths)))
 
 
+def classify(img, cfg=None, base=".", no_back=True):
+    """One look at an ad screen, no phone needed: what adwatch's saved pictures say about it.
+    Returns ("dead_end", picture) - an ad with no way out (seen on 2 looks in a row, give up on it);
+    ("system", picture) - the phone's own screen, tap nothing; ("tap", x, y, picture) - a skip or close
+    button; or ("wait", None). For a program that drives its own phone (an iPhone without adb). It
+    doesn't learn or remember decoys: watch_ad(device=...) does the whole ad more safely."""
+    gray = img if getattr(img, "ndim", 0) == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    cfg = cfg or {}
+    thr = cfg.get("threshold", 0.85)
+    dead = with_common(cfg.get("deadend_templates", []), base, "deadend_*.png")
+    if no_back:
+        dead += with_common(cfg.get("noback_deadend_templates", []), base, "nobackdead_*.png")
+    for kind, pics in (("dead_end", dead), ("system", with_common([], base, "system_*.png"))):
+        ranked = [r for r in score_all(gray, pics) if r[0] >= thr] if pics else []
+        if ranked:
+            return (kind, os.path.basename(ranked[0][3]))
+    for kind, pattern in (("skip", "skip_*.png"), ("close", "close_*.png")):
+        pics = with_common(cfg.get(f"{kind}_templates", []), base, pattern)
+        hit, _ = find_button(gray, pics, thr, kind) if pics else (None, [])
+        if hit:
+            return ("tap", hit[1], hit[2], os.path.basename(hit[3]))
+    hit = thin_x(gray) if cfg.get("thin_x", True) else None
+    if hit:
+        return ("tap", hit[1], hit[2], hit[3])
+    return ("wait", None)
+
+
 def select_point(img, title):
     """Tk picker: click one spot. Returns (x_fraction, y_fraction) or None."""
     import base64
@@ -2788,6 +2815,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     # where BACK does nothing): seen on 2 looks in a row past the minimum wait, the ad is given up
     # on at once instead of after minutes of BACK presses (the caller restarts the game).
     deadends = with_common(cfg.get("deadend_templates", []), base, "deadend_*.png")
+    if not can_back:
+        # Ads with no way out only where there is no BACK key (an iPhone): on Android BACK often closes them
+        # (SurveyPop's survey card), so they are kept apart from the deadend_* pictures every phone uses.
+        deadends += with_common(cfg.get("noback_deadend_templates", []), base, "nobackdead_*.png")
     deadend_looks = 0
     # Looks learned to have no way out (dead_looks.json): one BACK, then give up.
     learn_dead = cfg.get("learn_dead_ends", True)

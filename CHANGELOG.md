@@ -4,6 +4,10 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### classify(): one look at an ad screen without a phone; no-way-out pictures for phones without BACK (Nov 13)
+- **New `classify(screenshot)`**: says what adwatch's saved pictures make of one ad screen (tap here, no way out, the phone's own screen, or wait), for programs that drive their own phone, such as an iPhone bot without adb.
+- **New `nobackdead_*.png` pictures: ads with no way out only on a phone without a BACK key.** On Android BACK often closes them (SurveyPop's survey card), so they aren't `deadend_` pictures; on an iPhone nothing does.
+
 ### A close button that ignores early taps is retried sooner, and its screens are kept (Nov 13)
 - **On a phone with a BACK key, a close button set aside after taps that did nothing gets its next go after 10 seconds instead of 20** (`same_tap_pause` still sets it). Some ads (Facebook's Audience Network, for one) show their X long before it works; a heart ad was closed by the same X 30 seconds after it was set aside.
 - **adwatch now saves the screen when it sets such an X aside (`x-ignored-...`) and again when it retries it (`x-retry-...`)**, in `debug/`, so the two looks can be compared: an X that isn't active yet may look slightly different.
