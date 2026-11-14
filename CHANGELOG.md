@@ -4,6 +4,11 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Safer when the phone doesn't say which app is in front (Nov 13, from a code review)
+- **On a phone that can tell which app is in front (Android), a look where it gave no answer taps nothing**, up to 3 looks in a row, then carries on as before. The ad may have just opened the Play Store or a sign-in page, which a tap meant for the ad would land on. iPhones are unaffected (they can never tell).
+- **Samsung's Galaxy Store counts as a store**, like Google Play, not as "another app showing an ad for the game".
+- Smaller fixes from the same review: `adb devices` has a 10-second timeout (a hung adb no longer hangs a program that imports adwatch); the screenshot fallback no longer reads an old or another phone's picture; profiles and the starter copy are written whole; an unreadable template is skipped instead of stopping the ad.
+
 ### A skip button is never tapped on an ad known to have no way out (Nov 13)
 - **When a saved no-way-out picture matches the ad, adwatch no longer taps a skip button on it.** A native ad's round play-and-bar icon looks like a skip button but opens the App Store (an iPhone ad, Frankenmuth; the Packz video's yellow icon is the same). Those ads are now recognised and given up on, not tapped.
 

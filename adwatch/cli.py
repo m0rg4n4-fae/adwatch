@@ -1048,7 +1048,7 @@ def foreign_ad(pkg, act):
     ("Ads served by Meta") run inside the Facebook app: com.facebook.katana /
     ...AudienceNetworkRemoteActivity. Decided by the screen's name, so opening the Facebook app
     yourself (its normal screens) never counts."""
-    return bool(pkg) and bool(act) and pkg != "com.android.vending" and is_ad_activity(act)
+    return bool(pkg) and bool(act) and pkg not in STORE_PACKAGES and is_ad_activity(act)
 
 
 def app_chooser(pkg, act):
@@ -2917,6 +2917,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     decoy_try = None                      # (picture@spot, when) of a remembered decoy given one more try
     last_try_used = False                 # that one more try is given once per ad
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
+    unknown_front = 0                     # looks in a row where the phone didn't say what is in front
     said_stale = False                    # "the phone's picture stopped updating" said for this wait
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
     x_retried = False                     # (no BACK key) a set-aside close button gets one more go before giving up
@@ -3175,6 +3176,16 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
         # An ad click-through opened the store / a browser: go back to the game.
         fg, act = focus()
+        if not fg and can_tell_front():
+            # The phone can say what is in front but didn't (a slow shell, a screen change): it could be the
+            # store, a sign-in page, anything. Tap nothing on this look; after 3 in a row carry on as before.
+            unknown_front += 1
+            if unknown_front <= 3:
+                dlog(f"ad: front app unknown ({unknown_front} of 3) - tapping nothing on this look")
+                nap(1.0)
+                continue
+        else:
+            unknown_front = 0
         if act and (fg == pkg or foreign_ad(fg, act)) and is_ad_activity(act, cfg.get("ad_activities", [])):
             ad_kind = act.rsplit(".", 1)[-1]
         if fg and fg != pkg and foreign_ad(fg, act):
