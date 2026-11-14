@@ -1155,13 +1155,12 @@ def cmd_get_adb(args=None):
 
 
 # ------------------------------------------------------- device auto-detection
-IP_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$")
 
 
 def list_devices():
     try:
-        out = subprocess.run([ADB, "devices", "-l"], capture_output=True).stdout.decode(errors="replace")
-    except FileNotFoundError:          # adb isn't installed
+        out = subprocess.run([ADB, "devices", "-l"], capture_output=True, timeout=10).stdout.decode(errors="replace")
+    except (FileNotFoundError, subprocess.TimeoutExpired):   # adb isn't installed / its server is wedged
         return []
     devs = []
     for line in out.splitlines()[1:]:
@@ -4935,8 +4934,8 @@ def pause():
 def all_devices():
     """Every phone adb knows about, ready or not: [(serial, state, model)]."""
     try:
-        out = subprocess.run([ADB, "devices", "-l"], capture_output=True).stdout.decode(errors="replace")
-    except FileNotFoundError:
+        out = subprocess.run([ADB, "devices", "-l"], capture_output=True, timeout=10).stdout.decode(errors="replace")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
     rows = []
     for line in out.splitlines()[1:]:
