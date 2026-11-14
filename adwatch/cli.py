@@ -2761,6 +2761,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     poll = cfg.get("poll_seconds", 0.5 if FEED is not None else 1)
     use_ui = cfg.get("ui_fallback", True)
     ui_every = cfg.get("ui_check_seconds", 6)   # the UI-tree dump takes seconds: don't run it every loop
+    ui_misses = 0                         # UI-tree dumps on this ad that found nothing in a row
     last_ui, ui_tried = 0.0, {}
     # Ads with no other exit (must visit the store, then BACK, before the X appears):
     stuck = with_common(cfg.get("stuck_tap_templates", []), base, "stuck_*.png")
@@ -2844,9 +2845,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             if "@" not in k or n - ok.get(k, 0) < 2 or k.startswith(IOS_DECOY) != ios:
                 continue                                # (an iPhone only goes by what it learned itself)
             spot = (decoy_name(k), k.rsplit("@", 1)[1])
-            if n - ok.get(k, 0) >= DECOY_SURE:          # a spot this sure (Google's skip-to-end disc, drawn dark
-                out.add(spot)                           # or light over each ad's video) needs no look to match
-                continue
+            if n - ok.get(k, 0) >= DECOY_SURE and not spot[0].startswith("skip_"):
+                out.add(spot)                           # a close picture this sure needs no look to match. Not a
+                continue                                # skip: refusing one can cost the whole ad (80 s, Pixel Flow
+                                                        # 18:34), a wrong tap only a store trip and BACK
             if not looks.get(k):
                 if not decoy_name(k).startswith("skip_"):
                     out.add(spot)
@@ -3442,9 +3444,12 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 tap_button(n, "close", gray, f", in the same spot {near_looks} looks in a row")
                 continue
             ui = None
-            if use_ui and time.time() - last_ui >= ui_every:
+            # The UI-tree dump takes ~3 s on some phones: each one that finds nothing on this ad doubles the
+            # wait before the next (6, 12, 24, 48 s) so it doesn't slow every look down.
+            if use_ui and time.time() - last_ui >= ui_every * 2 ** min(ui_misses, 3):
                 last_ui = time.time()
                 ui = ui_close_button(skip=blocked_ui | {k for k, n in DECOYS["ui"].items() if n >= 2})
+                ui_misses = 0 if ui else ui_misses + 1
                 if ui and not (len(ui) > 3 and ui[3] in ("resume", "store")):   # those can come up again and again
                     k = (ui[2], ui[0] // 30, ui[1] // 30)
                     ui_tried[k] = ui_tried.get(k, 0) + 1

@@ -4,6 +4,10 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A skip button is tried again even where it often opened the store; fewer slow UI-tree reads (Nov 13)
+- **A skip picture in a spot remembered as a store-opener is tried again whenever the screen there looks different from before, however lopsided its record.** Yesterday's rule refused such a spot whatever it looked like; for skip buttons that was too strict: Google's round "skip to end" button was never pressed and an 80-second ad was waited out in full. A wrong skip tap only costs a trip to the store and BACK (and that spot isn't used again on that ad). Close buttons keep the stricter rule.
+- **The UI-tree read (a list of the buttons on screen, ~3 s on some phones) backs off on an ad where it keeps finding nothing**: every 6, then 12, 24 and 48 seconds, instead of on nearly every look. Each look is quicker, so adwatch reacts sooner when a button does appear.
+
 ### A playing video no longer counts as "nothing happening" for give_up_seconds (Nov 13)
 - **`give_up_seconds` now counts from the ad's last movement, including a video that keeps playing without a progress bar.** Before, only a progress bar or countdown counted as movement, so a full-screen video was given up on after `give_up_seconds` while it was still playing (seen at 27 s, with the whole picture changing on every look). `ad_max_seconds` still limits ads that keep moving forever.
 
