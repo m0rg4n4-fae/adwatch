@@ -2767,7 +2767,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     stuck_s = cfg.get("stuck_seconds", 30)
     stuck_thr = cfg.get("stuck_threshold", min(thr, 0.8))   # the badge is often caught mid-fade
     press_ms = cfg.get("press_ms", 120)
-    max_stuck = cfg.get("max_stuck_taps", 2)
+    # The store-badge trick (press the ad's store badge, come back with BACK to a finished ad) needs a BACK
+    # key: on a phone without one it only leaves for the store (an iPhone's App Store page may not close).
+    max_stuck = cfg.get("max_stuck_taps", 2 if can_back else 0)
     stuck_taps, last_stuck, badge_seen, badge_near = 0, 0.0, None, {}
     last_badge, badge_now = -1e9, False   # badge_now: press a visible badge right away (after a store trip)
     popups = with_common(cfg.get("popup_templates", []), base, "popup_*.png")

@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### No store-badge trick on a phone without a BACK key (Nov 13)
+- **On a phone with no BACK key (an iPhone), adwatch no longer presses an ad's store badge on purpose.** On Android that trick (go to the store, come back with BACK to a finished ad) often frees a stuck ad; without BACK it only leaves for the App Store, whose page may not close. A program can still turn it on with `"max_stuck_taps"`.
+
 ### adwatch waits while the phone's picture is out of date (Nov 13)
 - **A phone connection may offer `stale()`**: while it says the picture is out of date (an iPhone's screen stream that stopped sending anything), adwatch taps nothing and waits, and the waiting doesn't count towards giving up. Before, a frozen picture made working taps look ignored, and an ad (or the game behind it) could be given up on while the stream was down.
 
