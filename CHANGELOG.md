@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Each look prepares the screen once, not once per picture search (Nov 13, from a code review)
+- **adwatch now shrinks the screen and builds its edge and sum images once per look**, not again for each of the 6-10 picture searches a look makes (about 8 ms each). Same scores; looks are a little quicker on every phone.
+
 ### A tap that timed out is no longer sent a second time (Nov 13, from a code review)
 - **When the phone's fast input shell doesn't answer in time, adwatch no longer repeats the tap through plain adb.** The first tap may well have gone through on a slow phone, so a repeat was a double tap, perhaps on the game after the ad had closed. Two timeouts in a row switch the fast shell off (taps then go through plain adb); a shell that is gone is replaced as before. A fast shell that fails to start no longer leaves its adb process behind.
 

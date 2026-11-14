@@ -1555,6 +1555,27 @@ def _refine(small, small_g, t, tg, loc2, use_edge):
     return score, (loc[0] + x0, loc[1] + y0)
 
 
+_PREP = {"gray": None, "sig": None, "val": None}
+
+
+def _prepared(gray):
+    """The shrunken screen, its gradient and their integral images, which every score_all() on this
+    frame needs: made once per frame (a look makes 6-10 calls, 8 ms each). Matched by identity (`is`:
+    the last frame is kept alive here, so a recycled id() can't fool it) plus a few sampled pixels,
+    in case a caller edited the same array in place."""
+    sig = (gray.shape, float(gray[::97, ::89].sum()))
+    if _PREP["gray"] is gray and _PREP["sig"] == sig:
+        return _PREP["val"]
+    h, w = gray.shape[:2]
+    f = min(w, h) / MATCH_W
+    small = cv2.resize(gray, (max(1, round(w / f)), max(1, round(h / f))), interpolation=cv2.INTER_AREA)
+    small_g = _grad(small)
+    val = {"small": small, "small_g": small_g, "integ": cv2.integral2(small), "integ_g": cv2.integral2(small_g),
+           "half": None, "half_integ": None}
+    _PREP.update(gray=gray, sig=sig, val=val)
+    return val
+
+
 def score_all(gray, paths, stop_at=None, thorough=False):
     """Return [(score, cx, cy, path)] (cx, cy in real screen pixels), best first.
     Score = better of plain grayscale matching and edge matching. Edge matching (for
@@ -1564,12 +1585,11 @@ def score_all(gray, paths, stop_at=None, thorough=False):
     h, w = gray.shape[:2]
     short = min(w, h)
     f = short / MATCH_W
-    small = cv2.resize(gray, (max(1, round(w / f)), max(1, round(h / f))), interpolation=cv2.INTER_AREA)
-    small_g = _grad(small)
-    integ, integ_g = cv2.integral2(small), cv2.integral2(small_g)
+    prep = _prepared(gray)
+    small, small_g, integ, integ_g = prep["small"], prep["small_g"], prep["integ"], prep["integ_g"]
     results = []
     high = stop_at if stop_at is not None else 0.97
-    half = half_integ = None
+    half, half_integ = prep["half"], prep["half_integ"]
     use_edge = (lambda sc: thorough or EDGE_BAND <= sc < high)
     for p in paths:
         try:
@@ -1593,6 +1613,7 @@ def score_all(gray, paths, stop_at=None, thorough=False):
             if half is None:
                 half = cv2.resize(small, (small.shape[1] // 2, small.shape[0] // 2), interpolation=cv2.INTER_AREA)
                 half_integ = cv2.integral2(half)
+                prep["half"], prep["half_integ"] = half, half_integ
             hkey = (p, short, "half")
             if hkey not in _cache:
                 _cache[hkey] = cv2.resize(t, (tw // 2, th // 2), interpolation=cv2.INTER_AREA)
