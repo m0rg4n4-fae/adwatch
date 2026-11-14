@@ -2102,17 +2102,18 @@ def phone_label():
 def record_ad(pkg, outcome, seconds):
     """Count one ad in stats.json: per game, per phone and in total. outcome: 'watched' or 'gave_up'."""
     try:
+        phone = phone_label()               # (asks the phone: not while holding the lock other phones wait for)
         with locked(STATS_FILE):            # another phone's adwatch may be counting an ad right now
-            _count_ad(pkg, outcome, seconds)
+            _count_ad(pkg, outcome, seconds, phone)
     except Exception as e:                              # statistics must never stop a run
         dlog(f"stats: not recorded ({e})")
 
 
-def _count_ad(pkg, outcome, seconds):
+def _count_ad(pkg, outcome, seconds, phone=None):
     """Add one ad to stats.json (called with its lock held)."""
     stats = _read_json(STATS_FILE, {})
     day = time.strftime("%Y-%m-%d")
-    for group, name in (("games", pkg or "?"), ("phones", phone_label()), ("total", None)):
+    for group, name in (("games", pkg or "?"), ("phones", phone or phone_label()), ("total", None)):
         box = stats.setdefault(group, {})
         if name is not None:
             box = box.setdefault(name, {})
@@ -4573,9 +4574,14 @@ def load_profile(name):
 
 
 def save_profile(p, cfg):
-    with open(p, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
+    """Write a profile whole or not at all, under its lock: other programs read the same file (keep_reward
+    rewrites a shared profile while a bot that imported adwatch loads it)."""
+    with locked(p):
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, p)
 
 
 def cmd_new(args):
