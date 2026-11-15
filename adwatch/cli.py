@@ -2927,7 +2927,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     last_alive_check = time.time()
     LAST_AD_END["why"] = None
 
-    def decoy_spots(gray=None):
+    def decoy_spots(gray=None, early=False):
         # A spot counts as a decoy after opening the store on 2 ads, minus the ads it turned out to
         # close after all ("close_ok": both counts only grow, so runs on other phones merge safely),
         # and only while the screen there looks as it did when it opened the store ("looks"): another
@@ -2946,6 +2946,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 out.add(spot)                           # a close picture this sure needs no look to match. Not a
                 continue                                # skip: refusing one can cost the whole ad (80 s, Pixel Flow
                                                         # 18:34), a wrong tap only a store trip and BACK
+            if early and n - ok.get(k, 0) >= DECOY_SURE:
+                out.add(spot)                           # ...but not yet: a store-prone skip waits until the ad has
+                continue                                # ended (short ads end by themselves: 4 store trips in 15 min)
             if not looks.get(k):
                 if not decoy_name(k).startswith("skip_"):
                     out.add(spot)
@@ -3455,7 +3458,8 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
 
         # ---- always-safe buttons: skip, "reward granted" ----------------------------------------
         if skips and elapsed >= skip_after and not dead_hits:
-            hit, _ = find_button(gray, skips, close_thr, "skip", decoy_spots(gray))
+            hit, _ = find_button(gray, skips, close_thr, "skip",
+                                 decoy_spots(gray, early=not ended and elapsed < cfg.get("store_prone_skip_after", 45)))
             if hit:
                 tap_button(hit, "skip", gray, f" - a skip button, {elapsed:.0f}s in")
                 continue
