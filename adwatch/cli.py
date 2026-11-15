@@ -2967,6 +2967,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
     unknown_front = 0                     # looks in a row where the phone didn't say what is in front
     said_stale = False                    # "the phone's picture stopped updating" said for this wait
+    alert_cleared = False                 # (no BACK key) a system alert over the ad was closed once: the X gets a fresh go
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
     x_retried = False                     # (no BACK key) a set-aside close button gets one more go before giving up
 
@@ -3790,10 +3791,18 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     # swipe down inside it. Not from the screen's top edge: on an iPhone that opens
                     # Notification Center. The finger goes down at the middle, a third of the way down
                     # (below the sheet's buttons); a swipe that only passes over a button never presses it.
-                    sheet_swiped = True
-                    if dismiss_alert():
+                    if not alert_cleared and dismiss_alert():
+                        # An alert lay over the ad (Tile Match 10:26: "Update Apple Watch"): the taps meant for
+                        # the X never reached it. They don't count against it: it gets a fresh go before any swipe.
+                        alert_cleared = True
                         log("  closed a system alert over the ad")
                         nap(1.0)
+                        tap_counts.clear()
+                        blocked_spots.difference_update(guard_blocked)
+                        guard_blocked.clear()
+                        x_retried = False
+                        continue
+                    sheet_swiped = True
                     H, W = gray.shape[:2]
                     log("  its X did nothing: swiping the sheet down (closes a sheet over the ad)")
                     swipe(W // 2, int(H * 0.35), W // 2, int(H * 0.85), ms=350)

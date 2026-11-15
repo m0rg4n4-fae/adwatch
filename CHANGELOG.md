@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### Taps eaten by a system alert don't count against an ad's X (Nov 15)
+- **On the iPhone, when an iOS alert (e.g. "Update Apple Watch") lay over an ad, the taps meant for its X went to the alert and still counted as "the X did nothing".** After adwatch presses Dismiss on such an alert, the X now gets a fresh try before any swipe or give-up.
+
 ### A skip button that often opens the store waits until the ad has ended (Nov 14)
 - **A skip picture with a record of opening the store more often than closing the ad (4 or more trips beyond its closes) is no longer tapped while the video is still playing.** Short ads end by themselves, and each tap meant a store trip for nothing (five in a row on one game, 3-5 s each). It is tried again 12 s after the picture last moved, or after 45 s (`store_prone_skip_after`) for long ads where it is the only way out (one still look is not enough: a slow screenshot can catch a pause).
 
