@@ -5,7 +5,7 @@
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
 ### A skip button that often opens the store waits until the ad has ended (Nov 14)
-- **A skip picture with a record of opening the store more often than closing the ad (4 or more trips beyond its closes) is no longer tapped while the video is still playing.** Short ads end by themselves, and each tap meant a store trip for nothing (five in a row on one game, 3-5 s each). It is still tried once the ad has ended, or after 45 s (`store_prone_skip_after`) for long ads where it is the only way out.
+- **A skip picture with a record of opening the store more often than closing the ad (4 or more trips beyond its closes) is no longer tapped while the video is still playing.** Short ads end by themselves, and each tap meant a store trip for nothing (five in a row on one game, 3-5 s each). It is tried again 12 s after the picture last moved, or after 45 s (`store_prone_skip_after`) for long ads where it is the only way out (one still look is not enough: a slow screenshot can catch a pause).
 
 ### Each look prepares the screen once, not once per picture search (Nov 13, from a code review)
 - **adwatch now shrinks the screen and builds its edge and sum images once per look**, not again for each of the 6-10 picture searches a look makes (about 8 ms each). Same scores; looks are a little quicker on every phone.

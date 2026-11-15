@@ -3459,7 +3459,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # ---- always-safe buttons: skip, "reward granted" ----------------------------------------
         if skips and elapsed >= skip_after and not dead_hits:
             hit, _ = find_button(gray, skips, close_thr, "skip",
-                                 decoy_spots(gray, early=not ended and elapsed < cfg.get("store_prone_skip_after", 45)))
+                                 decoy_spots(gray, early=elapsed < cfg.get("store_prone_skip_after", 45) and now - last_video < 12))
             if hit:
                 tap_button(hit, "skip", gray, f" - a skip button, {elapsed:.0f}s in")
                 continue
