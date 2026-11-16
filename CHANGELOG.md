@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A store-prone skip also waits the first 12 s of an ad (Nov 16)
+- **The hold on skip buttons that mostly open the store (added Nov 14) only worked once a look had seen the picture move**, so in the first seconds of an ad (before two looks) such a skip was still tapped (Word Search 08:15: `skip_9`, 26 store trips for 1 close, tapped at 9 s). It now also holds for the first 12 s.
+
 ### A close button a hair under the bar gets one last try (no BACK key) (Nov 16)
 - **On a phone without a BACK key (iPhone), when nothing else is left, adwatch now taps the best close-looking button that scored just under the bar once, before giving up.** Twice on Nov 16 a real X or Close scored 0.83-0.84 (need 0.85) and was seen only twice, one look short of the "same spot 3 looks in a row" rule, so the ad was given up on with its button in plain view. Pictures that never closed an ad are still skipped.
 
