@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A picture is saved when adwatch has waited 100 s on a bar or ring (Nov 16)
+- **After 100 s of "ad still playing - holding off until it finishes" adwatch now saves one screen** (`long_hold_snapshot` seconds), so an ad whose progress bar never finishes (iPhone, a bar stuck at 9% for 3 minutes) can be looked at afterwards. Nothing else changes.
+
 ### The last try before giving up covers skip buttons too (Nov 16)
 - **A skip button held back because its look matches one that opened the store is now tried once, as a last resort, when nothing else is left on the ad** (until now only close buttons got that one try). A grey "Next" pill was the only way out of a 123 s app ad and was refused the whole time.
 

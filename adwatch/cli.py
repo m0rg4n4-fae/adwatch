@@ -2909,6 +2909,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     blocked_ui, blocked_spots = set(), set()
     bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = {}, 0.0, False, None, False
     ring, said_ring = CountdownRing(), False
+    said_long_hold = False                    # one picture per ad of a bar/ring we have been holding off for long
     ring_since, said_ring_held = None, False   # when the ring started ticking; said we stopped trusting it
     said_hidden = False                   # said that the ad's picture is black (hidden from screenshots)
     prev_small, looks, video_looks, last_video, said_ended = None, 0, 0, 0.0, False
@@ -3364,6 +3365,9 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         elif said_playing and not playing:
             dlog("ad: progress bar / countdown stopped")
         said_playing = playing
+        if playing and elapsed >= cfg.get("long_hold_snapshot", 100) and not said_long_hold:
+            said_long_hold = True                  # (a picture of what it is we have waited on for this long)
+            snapshot("long-hold", log)
         # Has it visibly ended? A bar that ran and stopped (or reached the end), a video that
         # played and then held still, or a picture that never moved at all.
         # A picture that is nearly all black: most likely an ad video that hides itself from
