@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### The last try before giving up covers skip buttons too (Nov 16)
+- **A skip button held back because its look matches one that opened the store is now tried once, as a last resort, when nothing else is left on the ad** (until now only close buttons got that one try). A grey "Next" pill was the only way out of a 123 s app ad and was refused the whole time.
+
 ### Taps eaten by a system alert don't count against an ad's X (Nov 15)
 - **On the iPhone, when an iOS alert (e.g. "Update Apple Watch") lay over an ad, the taps meant for its X went to the alert and still counted as "the X did nothing".** After adwatch presses Dismiss on such an alert, the X now gets a fresh try before any swipe or give-up.
 

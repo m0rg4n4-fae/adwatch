@@ -3760,9 +3760,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
             # Before BACK: a close picture held back only because it opened the store on earlier ads
             # (decoys.json) gets one try. Many real X's sit where a decoy once was (a top corner);
             # if it closes this ad, the spot is forgiven.
-            if back_presses == 0 and decoy_try is None and not last_try_used and close and gray is not None:
+            # (A skip picture too: WeWard's grey "Next" pill, 07:00 - held back by its look for the whole ad, no other way out.)
+            if back_presses == 0 and decoy_try is None and not last_try_used and (close or skips) and gray is not None:
                 remembered = decoy_spots(gray) - blocked_spots
-                hit, _ = find_button(gray, close, close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
+                hit, _ = find_button(gray, list(close) + list(skips), close_thr, "close (remembered decoys)", blocked_spots) if remembered else (None, [])
                 k = (os.path.basename(hit[3]), spot_of(hit[1], hit[2], gray.shape[1], gray.shape[0])) if hit else None
                 if k in remembered:
                     decoy_try = (decoy_key(k[0], k[1]), time.time())
