@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### The game is restarted when reopening it doesn't take us out of an ad's page (Nov 16)
+- **When the ad takes the phone out of the game (a browser page, the App Store) and bringing the game to the front doesn't help, the same place showing again within 15 s now restarts the game at once.** Before, adwatch reopened the game five times (a minute in all on Tile Match, Nov 16 15:20, an ad's in-app browser that sits inside the game) before giving up. Only the iPhone-style "away" pictures are involved.
+
 ### The last try on a near-miss close button looks at the spot, not only the picture (Nov 16)
 - **A close picture whose near-misses had never closed an ad (tapped 6 times elsewhere, no close) was ruled out for the one last try before giving up, everywhere.** An ad's yellow X that it scored 0.84 on came up four times on Nov 16 and was given up on each time. The last try now asks about that spot: a spot the picture was never tapped in still gets one try; a spot where it was tapped twice without closing does not. The track record is kept per picture and per spot (`decoys.json`, `near`).
 

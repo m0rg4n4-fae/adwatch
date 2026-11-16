@@ -2982,6 +2982,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
     unknown_front = 0                     # looks in a row where the phone didn't say what is in front
     said_stale = False                    # "the phone's picture stopped updating" said for this wait
+    last_left = None                      # (where, when) of the last time the ad took the phone out of the game
     near_last_used = False                # (no BACK key) the one last try on the best near-miss is used
     alert_cleared = False                 # (no BACK key) a system alert over the ad was closed once: the X gets a fresh go
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
@@ -3164,8 +3165,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         """Blind phones: a picture showed the ad took the phone out of the game (a browser, the
         App Store...). Blame what was tapped last and bring the game back. True: carry on with
         the ad; False: the game had to be restarted (the ad is gone with it)."""
-        nonlocal store_trips, closed_once, min_s, last_act, hold_until
+        nonlocal store_trips, closed_once, min_s, last_act, hold_until, last_left
         store_trips += 1
+        again = last_left is not None and last_left[0] == where and time.time() - last_left[1] < 15
+        last_left = (where, time.time())
         cause = last_act if last_act and time.time() - last_act[2] < 10 else None
         how = {"close": "a close picture", "skip": "a skip button", "popup": "the tap beside a pop-up",
                "badge": "the store badge", "ui": "a labelled button"}.get(cause[0]) if cause else None
@@ -3176,6 +3179,14 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         closed_once = False
         min_s = 0
         last_act = ("returned", "", time.time(), None)
+        if again:
+            # The same place twice within seconds: bringing the game to the front didn't take us out of it (an ad's
+            # in-app browser sits inside the game: Hill's page, Tile Match 15:20). Restart the game, as a phone that
+            # can't activate does.
+            log("  the game didn't come back that way - restarting it (the ad is gone with it)")
+            launch(pkg)
+            nap(5)
+            return False
         if activate(pkg):
             nap(2)
             if not (cause and cause[0] == "badge"):
