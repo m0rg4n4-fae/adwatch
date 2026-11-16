@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A close button a hair under the bar gets one last try (no BACK key) (Nov 16)
+- **On a phone without a BACK key (iPhone), when nothing else is left, adwatch now taps the best close-looking button that scored just under the bar once, before giving up.** Twice on Nov 16 a real X or Close scored 0.83-0.84 (need 0.85) and was seen only twice, one look short of the "same spot 3 looks in a row" rule, so the ad was given up on with its button in plain view. Pictures that never closed an ad are still skipped.
+
 ### A picture is saved when adwatch has waited 100 s on a bar or ring (Nov 16)
 - **After 100 s of "ad still playing - holding off until it finishes" adwatch now saves one screen** (`long_hold_snapshot` seconds), so an ad whose progress bar never finishes (iPhone, a bar stuck at 9% for 3 minutes) can be looked at afterwards. Nothing else changes.
 

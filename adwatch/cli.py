@@ -2968,6 +2968,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     final_look = False                    # one fresh look before giving up, if the screen changed meanwhile
     unknown_front = 0                     # looks in a row where the phone didn't say what is in front
     said_stale = False                    # "the phone's picture stopped updating" said for this wait
+    near_last_used = False                # (no BACK key) the one last try on the best near-miss is used
     alert_cleared = False                 # (no BACK key) a system alert over the ad was closed once: the X gets a fresh go
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
     x_retried = False                     # (no BACK key) a set-aside close button gets one more go before giving up
@@ -3781,6 +3782,21 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     dlog("ad: one more look before giving up")  # end card or App Store page still loading): one more round.
                     continue                                   # (Not "only if the screen changed": a small X on a big page
                                                                # hardly changes a thumbnail - Vinted's App Store page, 10:46.)
+                if not near_last_used and near_seen:
+                    # A close-looking button a hair under the bar (0.83 of 0.85: Tile Match 07:14 and 07:49, an Adobe
+                    # ad's yellow X and Vinted's Close pill) that was seen too few looks to count yet: with nothing
+                    # else left, the best of them gets one try before the ad is given up on.
+                    cands = [(k, v[1]) for k, v in near_seen.items()
+                             if k not in near_tapped and not near_useless(k[0], near_tries)]
+                    if cands:
+                        k, n = max(cands, key=lambda kv: kv[1][0])
+                        near_last_used = True
+                        near_record(k[0], "tapped")
+                        last_near = (k[0], time.time())
+                        near_tapped.add(k)
+                        log(f"  nothing else to try: tapping the nearest-looking close button ({k[0]} {n[0]:.2f}) once")
+                        tap_button(n, "close", gray, " - a last try")
+                        continue
                 if guard_blocked and not x_retried:
                     # An X set aside after taps that did nothing may just not have been working yet (some
                     # ads ignore their X for a while): it gets its later go now, before giving up.
