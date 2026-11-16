@@ -3807,6 +3807,18 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     guard_blocked.clear()
                     log("  trying the close button that didn't respond earlier once more")
                     continue
+                if not alert_cleared and gray is not None and dismiss_alert():
+                    # An iOS alert over the ad ("Update Apple Watch", Tile Match 14:33) hides what there is to tap
+                    # and eats the taps: Dismiss it (only that), then look again before giving up.
+                    alert_cleared = True
+                    log("  closed a system alert over the ad")
+                    nap(1.0)
+                    tap_counts.clear()
+                    blocked_spots.difference_update(guard_blocked)
+                    guard_blocked.clear()
+                    x_retried = False
+                    final_look = False
+                    continue
                 if not sheet_swiped and gray is not None and max(tap_counts.values(), default=0) >= 2:
                     # A sheet over the ad (Apple's App Store page: its X ignored two taps) closes with a
                     # swipe down inside it. Not from the screen's top edge: on an iPhone that opens

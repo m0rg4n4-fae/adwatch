@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### An iOS alert over an ad is dismissed before giving up, even if nothing was tapped yet (Nov 16)
+- **On the iPhone, when adwatch is about to give up and an iOS alert ("Update Apple Watch") is covering the ad, it now presses that alert's Dismiss first** and looks again. Before, Dismiss was only pressed after an X had been tapped twice with no effect (Nov 15), so an alert that appeared on an ad with nothing to tap yet got the ad given up on. Only Dismiss is ever pressed.
+
 ### A store-prone skip also waits the first 12 s of an ad (Nov 16)
 - **The hold on skip buttons that mostly open the store (added Nov 14) only worked once a look had seen the picture move**, so in the first seconds of an ad (before two looks) such a skip was still tapped (Word Search 08:15: `skip_9`, 26 store trips for 1 close, tapped at 9 s). It now also holds for the first 12 s.
 
