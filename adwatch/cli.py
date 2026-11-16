@@ -2109,13 +2109,27 @@ def dead_look_record(thumb, outcome):
 _WAKE_SKIP_SAID = set()   # ad kinds already told about (said once per run)
 
 
-def near_record(name, outcome=None):
-    """Track record of near-miss taps on a close picture; `outcome` ("tapped"/"closed") adds to it."""
-    rec = DECOYS.setdefault("near", {}).setdefault(name, {"tapped": 0, "closed": 0})
+def near_record(name, outcome=None, spot=None):
+    """Track record of near-miss taps on a close picture; `outcome` ("tapped"/"closed") adds to it.
+    With a `spot` the same count is also kept for that picture in that spot (`name@spot`)."""
+    near = DECOYS.setdefault("near", {})
+    rec = near.setdefault(name, {"tapped": 0, "closed": 0})
     if outcome:
         rec[outcome] += 1
+        if spot:
+            near.setdefault(f"{name}@{spot}", {"tapped": 0, "closed": 0})[outcome] += 1
         save_decoys()
     return rec
+
+
+def near_useless_at(name, spot, tries=6):
+    """The same for one spot (the last try before giving up): a picture that never closed an ad elsewhere still
+    gets one try in a spot it was never tapped in (Adobe's yellow X: close_50 0.84, four times on Nov 16); in a
+    spot where it has been tapped twice without ever closing, it is useless."""
+    rec = DECOYS.get("near", {}).get(f"{name}@{spot}")
+    if rec is None:
+        return False
+    return rec.get("tapped", 0) >= min(tries, 2) and not rec.get("closed", 0)
 
 
 def near_useless(name, tries=6):
@@ -3030,7 +3044,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # the lessons below count in both (they only counted True, so bots' closes were never learned).
         closed = result is True or result in ("closed", "gone")
         if closed and last_near and time.time() - last_near[1] < 8:
-            near_record(last_near[0], "closed")           # the near-miss tap was the way out
+            near_record(last_near[0], "closed", last_near[2] if len(last_near) > 2 else None)           # the near-miss tap was the way out
         if closed and dead_hit is not None:
             dead_look_record(dead_hit, "closed")         # it looked dead but closed: count against the look
         if closed and decoy_try and (len(decoy_try) > 2 or time.time() - decoy_try[1] < 15):
@@ -3787,12 +3801,12 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                     # ad's yellow X and Vinted's Close pill) that was seen too few looks to count yet: with nothing
                     # else left, the best of them gets one try before the ad is given up on.
                     cands = [(k, v[1]) for k, v in near_seen.items()
-                             if k not in near_tapped and not near_useless(k[0], near_tries)]
+                             if k not in near_tapped and not near_useless_at(k[0], k[1], near_tries)]
                     if cands:
                         k, n = max(cands, key=lambda kv: kv[1][0])
                         near_last_used = True
-                        near_record(k[0], "tapped")
-                        last_near = (k[0], time.time())
+                        near_record(k[0], "tapped", k[1])
+                        last_near = (k[0], time.time(), k[1])
                         near_tapped.add(k)
                         log(f"  nothing else to try: tapping the nearest-looking close button ({k[0]} {n[0]:.2f}) once")
                         tap_button(n, "close", gray, " - a last try")

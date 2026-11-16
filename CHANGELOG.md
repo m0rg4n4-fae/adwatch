@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### The last try on a near-miss close button looks at the spot, not only the picture (Nov 16)
+- **A close picture whose near-misses had never closed an ad (tapped 6 times elsewhere, no close) was ruled out for the one last try before giving up, everywhere.** An ad's yellow X that it scored 0.84 on came up four times on Nov 16 and was given up on each time. The last try now asks about that spot: a spot the picture was never tapped in still gets one try; a spot where it was tapped twice without closing does not. The track record is kept per picture and per spot (`decoys.json`, `near`).
+
 ### An iOS alert over an ad is dismissed before giving up, even if nothing was tapped yet (Nov 16)
 - **On the iPhone, when adwatch is about to give up and an iOS alert ("Update Apple Watch") is covering the ad, it now presses that alert's Dismiss first** and looks again. Before, Dismiss was only pressed after an X had been tapped twice with no effect (Nov 15), so an alert that appeared on an ad with nothing to tap yet got the ad given up on. Only Dismiss is ever pressed.
 
