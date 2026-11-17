@@ -2923,6 +2923,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     blocked_ui, blocked_spots = set(), set()
     bar_hist, last_moving, said_playing, bar_at, bar_seen_moving = {}, 0.0, False, None, False
     ring, said_ring = CountdownRing(), False
+    bar_since, said_bar_held = None, False   # when a bar first moved; said a bar was moving too long to be a video's
     said_long_hold = False                    # one picture per ad of a bar/ring we have been holding off for long
     ring_since, said_ring_held = None, False   # when the ring started ticking; said we stopped trusting it
     said_hidden = False                   # said that the ad's picture is black (hidden from screenshots)
@@ -3361,6 +3362,18 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         if seen_bars:
             bar_at = moving_bar if moving_bar is not None else seen_bars.get("bottom", seen_bars.get("top"))
         bar_running = bool(last_moving) and now - last_moving < 4
+        if bar_running:
+            bar_since = bar_since or now
+        if bar_since and now - bar_since > cfg.get("bar_max_seconds", 120):
+            # A video's own bar fills within a minute or two. One that has been "moving" for longer is something
+            # else that keeps changing: a playable ad's own score bars (Tasty Travels on Tile Match, 16:20: 150 s
+            # of "still playing" with a small X in plain view). Stop letting it hold the ad.
+            if not said_bar_held:
+                log(f"  a progress bar has been moving for over {cfg.get('bar_max_seconds', 120)}s - "
+                    "probably not a video's, looking for a close button anyway")
+                said_bar_held = True
+            bar_running = False
+        bar_capped = said_bar_held
         ticking = ring.update(gray, now) if gray is not None else False
         ring_since = (ring_since or now) if ticking else None
         if ticking and now - ring_since > cfg.get("ring_max_seconds", 60):
@@ -3417,7 +3430,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # A rewarded video that is visibly still running: leave its close-looking pictures alone.
         # (watch mode too, for a game known to show reward ads: closing one early loses the reward)
         too_early = (not passive or cfg.get("reward_ads")) and ((bar_running and (bar_at or 0) < bar_close) or ticking or (
-            bar_seen_moving and (bar_at or 0) < bar_close and now - last_moving < bar_stall))
+            bar_seen_moving and not bar_capped and (bar_at or 0) < bar_close and now - last_moving < bar_stall))
         wait_s = min_s
         if done_min is not None and ended:
             wait_s = min(min_s, done_min)

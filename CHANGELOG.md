@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A progress bar that keeps moving for over 2 minutes stops holding the ad (Nov 16)
+- **A bar that has been "moving" for longer than `bar_max_seconds` (120 s) is no longer treated as a video's progress.** A video's bar fills within a minute or two; a playable ad's own score bars (Tasty Travels on Tile Match, 16:20) keep changing for as long as the ad runs, so adwatch waited "until it finishes" for 150 s with the ad's small X in plain view. After 120 s it now says so and looks for a close button, the same way the countdown ring is already capped at 60 s.
+
 ### The game is restarted when reopening it doesn't take us out of an ad's page (Nov 16)
 - **When the ad takes the phone out of the game (a browser page, the App Store) and bringing the game to the front doesn't help, the same place showing again within 15 s now restarts the game at once.** Before, adwatch reopened the game five times (a minute in all on Tile Match, Nov 16 15:20, an ad's in-app browser that sits inside the game) before giving up. Only the iPhone-style "away" pictures are involved.
 
