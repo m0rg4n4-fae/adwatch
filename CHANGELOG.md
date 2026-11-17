@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### The countdown ring cap counts all the time the ring ticked (Nov 16)
+- **The 60 s cap on a "countdown ring" (`ring_max_seconds`) restarted every time the ring flickered off for one look.** A survey ad's round badge did that (Tile Match 17:10), so adwatch waited 180 s "until the countdown finishes" with the ad's X in plain view. The cap now counts the ring's total ticking time, flickers included.
+
 ### A tap just made gets 12 s before ad_max_seconds gives the ad up (Nov 16)
 - **An ad with no progress bar was given up on at `ad_max_seconds` counted from its start, even a few seconds after its X first appeared and was tapped.** Tile Match 16:47: a 60 s video ad showed its X at 56 s, the first tap was ignored (the X wasn't active yet) and the ad was given up on 6 s later. A tap made in the last `tap_grace_seconds` (12) now holds that cap off.
 

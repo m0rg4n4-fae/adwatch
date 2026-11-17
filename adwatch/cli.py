@@ -2925,6 +2925,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     ring, said_ring = CountdownRing(), False
     bar_since, said_bar_held = None, False   # when a bar first moved; said a bar was moving too long to be a video's
     said_long_hold = False                    # one picture per ad of a bar/ring we have been holding off for long
+    ring_total, ring_prev = 0.0, None             # seconds the ring has been ticking in all (a flicker off doesn't reset it)
     ring_since, said_ring_held = None, False   # when the ring started ticking; said we stopped trusting it
     said_hidden = False                   # said that the ad's picture is black (hidden from screenshots)
     prev_small, looks, video_looks, last_video, said_ended = None, 0, 0, 0.0, False
@@ -3376,7 +3377,10 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         bar_capped = said_bar_held
         ticking = ring.update(gray, now) if gray is not None else False
         ring_since = (ring_since or now) if ticking else None
-        if ticking and now - ring_since > cfg.get("ring_max_seconds", 60):
+        if ticking and ring_prev is not None:
+            ring_total += min(now - ring_prev, 6.0)       # (all the time it was "ticking", flickers off included)
+        ring_prev = now
+        if ticking and (now - ring_since > cfg.get("ring_max_seconds", 60) or ring_total > cfg.get("ring_max_seconds", 60)):
             # Real countdowns last 5-30 s; one still "ticking" after a minute is something round
             # that keeps changing (an animation), not a timer. Stop letting it hold the ad.
             if not said_ring_held:
