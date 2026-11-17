@@ -3786,7 +3786,8 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
         # ---- nothing to tap: BACK, then give up ------------------------------------------------
         # An ad that has visibly ended and offers nothing for no_exit_seconds gets BACK straight
         # away (twice, then it is given up on - the ad loop then restarts the game); one that
-        # gives no sign either way waits until ad_max_seconds without progress (or give_up_seconds, if set).
+        # gives no sign either way waits until ad_max_seconds without progress (or give_up_seconds, if set) - and
+        # until a tap made just now (an X that showed at 56 s of a 60 s ad: Tile Match 16:47) has had tap_grace_seconds.
         last_try = max(start + wait_s, last_moving, last_act[2] if last_act and last_act[0] != "back" else 0.0)
         badge_pending = stuck and badge_seen and stuck_taps == 0
         known_dead = dead_seen >= 2
@@ -3794,7 +3795,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                 or give_up_s is not None and now - max(last_try, last_video) >= give_up_s) and not badge_pending
         # (give_up_seconds counts from the last sign of life: a video that keeps playing with no progress
         #  bar is not "nothing happening" - Tile Match gave up on one at 27 s, 24 of 24 cells changing)
-        if risky_ok and (quiet >= max_s or fast):
+        if risky_ok and ((quiet >= max_s and now - last_try >= cfg.get("tap_grace_seconds", 12)) or fast):
             if check_touch_lock(cfg, log):                 # nothing worked because taps were being swallowed
                 last_lock_check = time.time()
                 back_presses = 0

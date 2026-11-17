@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A tap just made gets 12 s before ad_max_seconds gives the ad up (Nov 16)
+- **An ad with no progress bar was given up on at `ad_max_seconds` counted from its start, even a few seconds after its X first appeared and was tapped.** Tile Match 16:47: a 60 s video ad showed its X at 56 s, the first tap was ignored (the X wasn't active yet) and the ad was given up on 6 s later. A tap made in the last `tap_grace_seconds` (12) now holds that cap off.
+
 ### A progress bar that keeps moving for over 2 minutes stops holding the ad (Nov 16)
 - **A bar that has been "moving" for longer than `bar_max_seconds` (120 s) is no longer treated as a video's progress.** A video's bar fills within a minute or two; a playable ad's own score bars (Tasty Travels on Tile Match, 16:20) keep changing for as long as the ad runs, so adwatch waited "until it finishes" for 150 s with the ad's small X in plain view. After 120 s it now says so and looks for a close button, the same way the countdown ring is already capped at 60 s.
 
