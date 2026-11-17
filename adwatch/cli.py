@@ -1779,6 +1779,48 @@ def thin_x(gray, blocked=()):
     return best if best and best[0] >= THIN_X_MIN else None
 
 
+FAINT_X_MIN = 0.62                       # real small SDK X's 0.65-0.82; look-alikes in the status bar 0.61, elsewhere less
+
+
+def _faint_x_shape(size):
+    key = ("faint-x", size)
+    if key not in _cache:
+        t = np.zeros((size, size), np.uint8)
+        m, thick = max(2, size // 10), max(2, size // 6)
+        cv2.line(t, (m, m), (size - 1 - m, size - 1 - m), 255, thick, cv2.LINE_AA)
+        cv2.line(t, (size - 1 - m, m), (m, size - 1 - m), 255, thick, cv2.LINE_AA)
+        _cache[key] = t
+    return _cache[key]
+
+
+def faint_x(gray, blocked=()):
+    """A small, thick-stroked light X in a top corner (the ad SDK's translucent close disc: ~50 px, a light x on a
+    darker disc over the ad's picture, Tile Match Nov 16: Tasty Travels, AHEALTH, Perfit, Survey Spin), where no saved
+    picture matches because the scene behind it changes. Only used as the last try before giving up, never in the
+    status bar. -> (score, x, y, name) or None."""
+    if gray is None:
+        return None
+    H, W = gray.shape[:2]
+    light = np.where(gray >= 200, 255, 0).astype(np.uint8)
+    y_lo, y_hi = int(H * 0.05), int(H * 0.14)
+    top = light[y_lo:y_hi]
+    best = None
+    for size in (16, 20, 24, 28):
+        t = _faint_x_shape(size)
+        for x0, x1 in ((0, int(W * 0.30)), (int(W * 0.70), W)):
+            crop = top[:, x0:x1]
+            if crop.shape[0] < size or crop.shape[1] < size or not crop.any():
+                continue
+            res = cv2.matchTemplate(crop, t, cv2.TM_CCOEFF_NORMED)
+            cv2.patchNaNs(res, 0.0)
+            _, score, _, loc = cv2.minMaxLoc(res)
+            x, y = x0 + loc[0] + size // 2, y_lo + loc[1] + size // 2
+            if (best is None or score > best[0]) and ("faint X", spot_of(x, y, W, H)) not in blocked:
+                best = (float(score), x, y, "faint X")
+    dlog("find faint X: " + (f"best {best[0]:.2f} at {best[1]},{best[2]}" if best else "none") + f" (need {FAINT_X_MIN:.2f})")
+    return best if best and best[0] >= FAINT_X_MIN else None
+
+
 def find_button(gray, paths, thr, what="", blocked=(), near=NEAR_MISS, scales=EXTRA_SCALES, second_look=True):
     """An ad button (close, skip, store badge) on screen -> (hit, near_misses).
     hit = (score, x, y, path) or None; near_misses = [(score, x, y, path)] that scored at least
@@ -2985,6 +3027,7 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
     unknown_front = 0                     # looks in a row where the phone didn't say what is in front
     said_stale = False                    # "the phone's picture stopped updating" said for this wait
     last_left = None                      # (where, when) of the last time the ad took the phone out of the game
+    faint_last_used = False               # (no BACK key) the one last try on a small X-shaped mark in a corner is used
     near_last_used = False                # (no BACK key) the one last try on the best near-miss is used
     alert_cleared = False                 # (no BACK key) a system alert over the ad was closed once: the X gets a fresh go
     sheet_swiped = False                  # (no BACK key) one swipe down inside a sheet whose X did nothing
@@ -3839,6 +3882,13 @@ def _watch_ad(cfg, base, log, home=None, in_game=None):
                         near_tapped.add(k)
                         log(f"  nothing else to try: tapping the nearest-looking close button ({k[0]} {n[0]:.2f}) once")
                         tap_button(n, "close", gray, " - a last try")
+                        continue
+                if not faint_last_used and gray is not None and cfg.get("faint_x", True):
+                    fx = faint_x(gray, blocked_spots)
+                    if fx:
+                        faint_last_used = True
+                        log(f"  nothing else to try: tapping the small X-shaped mark in the corner ({fx[0]:.2f}) once")
+                        tap_button(fx, "close", gray, " - a last try")
                         continue
                 if guard_blocked and not x_retried:
                     # An X set aside after taps that did nothing may just not have been working yet (some

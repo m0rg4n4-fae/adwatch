@@ -4,6 +4,9 @@
 
 Everything below has been added since the first GitHub release (`c248923`, "adwatch 0.1.0", Oct 8 2026).
 
+### A small light X in a top corner gets one last try (iPhone, Nov 16)
+- **When nothing else is left (no BACK key), adwatch now taps a small, thick-stroked light "x" in a top corner once** (`faint_x`, off with `"faint_x": false`). It is the ad SDK's translucent close disc (about 50 px, top-left), seen on at least five ads on Nov 16 (Tasty Travels playables, AHEALTH, Perfit, Survey Spin): no saved picture can match it because the scene behind it changes, so those ads were given up on after 1-3 minutes with the X in plain view. The finder skips the status bar and found only real X's on 95 saved screens. Whether tapping it closes those ads is not yet known.
+
 ### The countdown ring cap counts all the time the ring ticked (Nov 16)
 - **The 60 s cap on a "countdown ring" (`ring_max_seconds`) restarted every time the ring flickered off for one look.** A survey ad's round badge did that (Tile Match 17:10), so adwatch waited 180 s "until the countdown finishes" with the ad's X in plain view. The cap now counts the ring's total ticking time, flickers included.
 
